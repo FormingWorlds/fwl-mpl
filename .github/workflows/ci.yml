@@ -1,0 +1,30 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Lint and test (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: pip install -e ".[test]" ruff
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Test with coverage
+        run: pytest -q --cov --cov-report=term-missing --cov-fail-under=90
+      - name: Render the specimen
+        run: python examples/specimen.py
