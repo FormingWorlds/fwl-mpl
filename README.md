@@ -21,18 +21,18 @@ The package needs Python 3.10 or newer, matplotlib 3.7 or newer and `cmcrameri`.
 import matplotlib.pyplot as plt
 import fwl_mpl
 
-fwl_mpl.use()          # light mode: white background, for papers
-fwl_mpl.use("dark")    # dark mode: for dark documentation pages and slides
+fwl_mpl.use()  # light mode: white background, for papers
+fwl_mpl.use("dark")  # dark mode: for dark documentation pages and slides
 
 fig, ax = plt.subplots()
-ax.plot(t, T)                                  # lines follow the 8-colour cycle
+ax.plot(t, T)  # lines follow the 8-colour cycle
 ax.set_xlabel(r"Time, $t$ (Myr)")
 fwl_mpl.panel_label(ax, "a")
 ```
 
 The style sheets also work on their own: `plt.style.use("fwl_mpl.light")` or `plt.style.use("fwl_mpl.dark")`.
 
-The default figure is 3.5 by 2.6 inches, for one column of a two-column page. A figure across both columns of an AASTeX page is 7.1 inches wide. PDF and PostScript output embed the fonts as TrueType.
+The default figure is 3.5 by 2.6 inches, for one column of a two-column page. A figure across both columns of an AASTeX page is 7.1 inches wide. The saved file keeps the figure size. PDF and PostScript output embed the fonts as TrueType; SVG output draws text as paths, so it shows the same type where the fonts are not installed.
 
 ### From Julia
 
@@ -56,9 +56,9 @@ pyimport("fwl_mpl").use()
 | rose | `#90003E` | `#BA6384` |
 | olive | `#556C00` | `#98AB71` |
 
-`fwl_mpl.colors(n, mode)` gives the first `n` colours of a cycle, `fwl_mpl.PALETTE[mode][name]` a single colour by name, and `fwl_mpl.SURFACES[mode]` the background, text, axis and grid colours plus `observed`, the colour for measured data points.
+`fwl_mpl.colors(n, mode)` gives the first `n` colours of a cycle, `fwl_mpl.PALETTE[mode][name]` a single colour by name, and `fwl_mpl.SURFACES[mode]` the neutral colours: `background`, `ink` (text and boxplots), `muted` (axes and ticks), `line` (grid) and `observed` (measured data points, the same colour as `ink`).
 
-Each mode has its own palette. In each one, the closest pair of colours is at least CAM02-UCS ΔE 12 apart for normal vision and for full-severity deuteranomaly, protanomaly and tritanomaly (simulated with `colorspacious`); the measured minimum is 12.6 in light mode and 12.3 in dark mode. With the same measure, the 7-colour Okabe-Ito palette (without black) scores 11.0. Every colour has at least 3:1 contrast against the light background and 4.5:1 against the dark one. The tests check these limits.
+Each mode has its own palette. In each one, the closest pair of colours is at least CAM02-UCS ΔE 12 apart for normal vision and for full-severity deuteranomaly, protanomaly and tritanomaly (simulated with `colorspacious`); the measured minimum is 12.6 in light mode and 12.3 in dark mode. With the same measure, the 7-colour Okabe-Ito palette (without black) scores 11.0. The `observed` colour is at least ΔE 12 from every palette colour too. Every colour has at least 3:1 contrast against the light background and 4.5:1 against the dark one. The tests check these limits.
 
 For more than 8 series, vary the line style or use a sequential colour map.
 
@@ -74,11 +74,11 @@ For more than 8 series, vary the line style or use a sequential colour map.
 
 ## Math and symbols
 
-Math text uses IBM Plex Sans with its italic for variables and upright text for `\mathrm{}`. IBM Plex Sans covers the Greek alphabet with one exception: matplotlib draws `\phi` as ϕ (U+03D5), which the font lacks, so write `\varphi` for φ. Glyphs the font does not have, such as ∇, ∝, ⊕ and ☉, come from STIX Sans in math and from DejaVu Sans in plain text. Write `M_\mathrm{Earth}` rather than `M_\oplus`.
+Math text uses IBM Plex Sans with its italic for variables and upright text for `\mathrm{}`. IBM Plex Sans covers the Greek alphabet with one exception: matplotlib draws `\phi` as ϕ (U+03D5), which the font lacks, so write `\varphi` for φ. Glyphs the font does not have, such as ∇, ∝, ⊕ and ☉, come from STIX Sans in math and from DejaVu Sans in plain text. Write `M_\mathrm{Earth}` rather than `M_\oplus`. With matplotlib 3.8 or newer, `fwl_mpl.use()` also sets bold italic math (`\mathbfit`) to IBM Plex Sans Medium Italic. IBM Plex has no calligraphic letters, so `\mathcal` draws the italic.
 
 ## Example
 
-`python examples/specimen.py` renders the specimen above in both modes to `examples/output/`.
+`pip install -e ".[examples]"`, then `python examples/specimen.py`, renders the specimen above in both modes to `examples/output/`.
 
 ## Development
 

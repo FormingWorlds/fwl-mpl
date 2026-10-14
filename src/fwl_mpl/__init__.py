@@ -20,11 +20,13 @@ contrast against the light background and 4.5:1 against the dark one.
 """
 
 import logging
+import operator
 from pathlib import Path
 
 import cmcrameri.cm  # noqa: F401  (registers the cmc.* colour maps)
 import matplotlib as mpl
-from matplotlib import font_manager
+from matplotlib import cbook, font_manager
+from matplotlib.text import Text
 
 __all__ = [
     "COLORMAPS",
@@ -48,7 +50,7 @@ _FONTS = _HERE / "fonts"
 
 MODES = ("light", "dark")
 
-# Cycle order: the first 4 hues are the most distinct pairs.
+# Fixed cycle order: series k always gets the k-th colour.
 NAMES = ("azure", "vermilion", "emerald", "amber", "violet", "teal", "rose", "olive")
 
 PALETTE = {
@@ -77,21 +79,22 @@ PALETTE = {
 CYCLE = [PALETTE["light"][n] for n in NAMES]
 CYCLE_DARK = [PALETTE["dark"][n] for n in NAMES]
 
-# Neutrals per mode. "observed" is the colour for measured data points.
+# Neutrals per mode. "observed" is the colour for measured data points; it stays
+# at Delta E >= 12 from every palette colour under the same vision conditions.
 SURFACES = {
     "light": {
         "background": "#FFFFFF",
         "ink": "#17151F",
         "muted": "#615D70",
         "line": "#E1DFEA",
-        "observed": "#2C2938",
+        "observed": "#17151F",
     },
     "dark": {
         "background": "#0D0C17",
         "ink": "#ECEAF4",
         "muted": "#9C98AE",
         "line": "#2A2838",
-        "observed": "#D2CFE0",
+        "observed": "#ECEAF4",
     },
 }
 
@@ -104,11 +107,22 @@ COLORMAPS = {
 
 
 class _QuietFallbackWeight(logging.Filter):
-    """Drop the notice that DejaVu Sans, the fallback for missing glyphs, has no Medium."""
+    """Drop the notice that DejaVu Sans, the fallback for missing glyphs, has no Medium.
+
+    matplotlib passes (weight, family, fallback weight), or (weight, fallback weight)
+    before 3.11.2. The bundled Plex has a Medium, so in the 2-argument form a medium
+    request that falls back to 400 comes from DejaVu Sans.
+    """
 
     def filter(self, record):
-        msg = record.getMessage()
-        return not (msg.startswith("findfont: Failed to find font weight") and "DejaVu Sans" in msg)
+        if not str(record.msg).startswith("findfont: Failed to find font weight"):
+            return True
+        args = record.args if isinstance(record.args, tuple) else ()
+        if len(args) == 3:
+            return args[1] != "DejaVu Sans"
+        if len(args) == 2:
+            return not (str(args[0]) in ("medium", "500") and args[1] == 400)
+        return True
 
 
 _FILTER = _QuietFallbackWeight()
@@ -129,13 +143,20 @@ def register_fonts():
     list of pathlib.Path
         The font files that this call registered.
     """
-    known = {Path(f.fname) for f in font_manager.fontManager.ttflist}
+    ttflist = font_manager.fontManager.ttflist
+    known = {Path(f.fname).resolve() for f in ttflist}
     added = []
     for path in sorted(_FONTS.glob("*.ttf")):
-        if path in known:
+        if path.resolve() in known:
             continue
         font_manager.fontManager.addfont(str(path))
         added.append(path)
+    # findfont takes the first exact match, so the bundled files go before any
+    # system copy of IBM Plex.
+    fonts_dir = _FONTS.resolve()
+    ours = [f for f in ttflist if Path(f.fname).resolve().parent == fonts_dir]
+    ids = {id(f) for f in ours}
+    ttflist[:] = ours + [f for f in ttflist if id(f) not in ids]
     return added
 
 
@@ -158,6 +179,9 @@ def use(mode="light"):
 
     register_fonts()
     plt.style.use(str(_HERE / f"{mode}.mplstyle"))
+    # matplotlib 3.8 added this key, so it cannot go in the style sheets.
+    if "mathtext.bfit" in mpl.rcParams:
+        mpl.rcParams["mathtext.bfit"] = "IBM Plex Sans:italic:medium"
 
 
 def colors(n=None, mode="light"):
@@ -178,6 +202,8 @@ def colors(n=None, mode="light"):
     ------
     ValueError
         If ``n`` is outside 1 to 8 or ``mode`` is unknown.
+    TypeError
+        If ``n`` is not an integer.
 
     Notes
     -----
@@ -188,6 +214,7 @@ def colors(n=None, mode="light"):
     cycle = CYCLE if mode == "light" else CYCLE_DARK
     if n is None:
         return list(cycle)
+    n = operator.index(n)
     if not 1 <= n <= len(cycle):
         raise ValueError(f"n must be between 1 and {len(cycle)}, got {n}")
     return list(cycle[:n])
@@ -225,7 +252,8 @@ def panel_label(ax, label, **kwargs):
     ax : matplotlib.axes.Axes
     label : str
     **kwargs
-        Passed to :meth:`matplotlib.axes.Axes.text`; they override the defaults.
+        Text properties, aliases such as ``size`` included; they override the
+        defaults. On 3D axes the label is placed with ``text2D``.
 
     Returns
     -------
@@ -233,13 +261,14 @@ def panel_label(ax, label, **kwargs):
     """
     opts = {
         "transform": ax.transAxes,
-        "ha": "right",
-        "va": "bottom",
+        "horizontalalignment": "right",
+        "verticalalignment": "bottom",
         "fontweight": "medium",
         "fontsize": mpl.rcParams["axes.titlesize"],
     }
-    opts.update(kwargs)
-    return ax.text(-0.02, 1.03, label, **opts)
+    opts.update(cbook.normalize_kwargs(kwargs, Text))
+    text = getattr(ax, "text2D", ax.text)
+    return text(-0.02, 1.03, label, **opts)
 
 
 register_fonts()

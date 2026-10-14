@@ -86,5 +86,12 @@ def test_text_neutrals_are_readable(mode):
 
 
 @pytest.mark.parametrize("mode", fwl_mpl.MODES)
+def test_observed_colour_separates_from_palette(mode):
+    observed = fwl_mpl.SURFACES[mode]["observed"]
+    for name, h in fwl_mpl.PALETTE[mode].items():
+        assert min_delta_e([observed, h]) >= MIN_DELTA_E, name
+
+
+@pytest.mark.parametrize("mode", fwl_mpl.MODES)
 def test_palette_separation_under_cvd(mode):
     assert min_delta_e(fwl_mpl.colors(mode=mode)) >= MIN_DELTA_E

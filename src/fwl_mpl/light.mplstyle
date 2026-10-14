@@ -1,21 +1,21 @@
 ## Forming Worlds Lab style, light mode.
 ## Colours must match PALETTE["light"] and SURFACES["light"] in __init__.py.
 
-## Figure: AAS single-column width, vector output with embedded TrueType fonts
+## Figure: one column of a two-column page; PDF and PS embed TrueType fonts,
+## SVG draws text as paths so it renders without the fonts installed
 figure.figsize: 3.5, 2.6
 figure.dpi: 150
 figure.constrained_layout.use: True
 figure.facecolor: FFFFFF
 savefig.facecolor: FFFFFF
 savefig.dpi: 300
-savefig.bbox: tight
-savefig.pad_inches: 0.02
 pdf.fonttype: 42
 ps.fonttype: 42
-svg.fonttype: none
+svg.fonttype: path
 
 ## Type: IBM Plex Sans with true italic for math variables
 font.family: IBM Plex Sans, DejaVu Sans
+font.monospace: IBM Plex Mono, DejaVu Sans Mono
 font.size: 8
 mathtext.fontset: custom
 mathtext.rm: IBM Plex Sans
@@ -39,6 +39,10 @@ xtick.labelcolor: 17151F
 ytick.labelcolor: 17151F
 grid.color: E1DFEA
 legend.labelcolor: 17151F
+boxplot.boxprops.color: 17151F
+boxplot.whiskerprops.color: 17151F
+boxplot.capprops.color: 17151F
+boxplot.flierprops.markeredgecolor: 17151F
 errorbar.capsize: 0
 
 ## Axes: open frame, outward ticks, no grid

@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Lint and test (Python ${{ matrix.python }})
@@ -19,7 +22,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install
-        run: pip install -e ".[test]" ruff
+        run: pip install -e ".[test,examples]" ruff
       - name: Lint
         run: |
           ruff check .
@@ -28,3 +31,25 @@ jobs:
         run: pytest -q --cov --cov-report=term-missing --cov-fail-under=90
       - name: Render the specimen
         run: python examples/specimen.py
+
+  minimum:
+    name: Test the oldest supported versions from the wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Build the wheel
+        run: |
+          pip install build
+          python -m build --wheel --outdir dist .
+      - name: Install the wheel with the minimum dependencies
+        run: pip install "matplotlib==3.7.*" "cmcrameri==1.7.*" "numpy<2" colorspacious pytest dist/*.whl
+      - name: Test the installed wheel outside the source tree
+        run: |
+          mkdir ../wheeltest
+          cp -R tests ../wheeltest/
+          cd ../wheeltest
+          python -c "import fwl_mpl, sys; assert 'site-packages' in fwl_mpl.__file__, fwl_mpl.__file__"
+          pytest -q tests
