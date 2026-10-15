@@ -142,8 +142,9 @@ def test_install_writes_stylesheet_fonts_and_licence(tmp_path):
     assert out == tmp_path / "assets" / "fwl.css"
     assert out.read_text(encoding="utf-8") == docs_theme.documenter_css()
     fonts = tmp_path / "assets" / docs_theme.FONT_DIR
-    assert (fonts / "OFL.txt").is_file()
-    assert (fonts / "IBMPlexSans-Regular.ttf").stat().st_size > 10_000
+    assert (fonts / "OFL.txt").read_bytes() == (fwl_mpl._FONTS / "OFL.txt").read_bytes()
+    for _, file, _, _ in docs_theme._FONT_FACES:
+        assert (fonts / file).read_bytes() == (fwl_mpl._FONTS / file).read_bytes(), file
 
 
 def test_install_is_idempotent(tmp_path):

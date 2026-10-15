@@ -9,9 +9,9 @@ Install it into the ``assets`` folder of a Documenter source tree::
 
     python -m fwl_mpl.docs_theme docs/src/assets
 
-and list ``"assets/fwl.css"`` in ``Documenter.HTML(; assets=[...])``. The light
-theme must stay the primary theme and ``documenter-dark`` the primary dark
-theme, which is the Documenter default.
+and list ``"assets/fwl.css"`` in ``Documenter.HTML(; assets=[...])``. The
+stylesheet restyles ``documenter-light`` and ``documenter-dark``; the catppuccin
+themes keep their own colours.
 """
 
 import argparse
@@ -209,8 +209,8 @@ _SB = "#documenter .docs-sidebar"
 _MENU = f"{_SB} ul.docs-menu"
 _HEADINGS = [f".content h{i}" for i in range(1, 7)]
 
-# (selectors, declarations). Each selector is matched at the specificity of the
-# stock rule it replaces; the stylesheet loads after the themes, so ties win.
+# (selectors, declarations). Selectors repeat the stock selectors they override, so
+# they reach the same specificity and win the tie by loading after the themes.
 _RULES = [
     # Page, type and text
     (
@@ -242,7 +242,11 @@ _RULES = [
         ["background-color: var(--fwl-sub)", "color: var(--fwl-ink)"],
     ),
     ([".content table tbody tr:hover"], ["background-color: var(--fwl-sub)"]),
-    ([":focus-visible"], ["outline: 2px solid var(--fwl-azure-fill)", "outline-offset: 2px"]),
+    # Bulma removes the outline on focused controls; keyboard focus must stay visible.
+    (
+        [":focus-visible"],
+        ["outline: 2px solid var(--fwl-azure-fill) !important", "outline-offset: 2px"],
+    ),
     # Navbar, breadcrumb, footer, footnotes, banners
     (
         ["#documenter .docs-main header.docs-navbar"],
@@ -257,6 +261,16 @@ _RULES = [
     (["#documenter .docs-main .docs-footer a"], ["color: var(--fwl-link)"]),
     (["#documenter .docs-main section.footnotes"], ["border-top-color: var(--fwl-line)"]),
     (
+        [".footnote-preview"],
+        [
+            "background-color: var(--fwl-bg)",
+            "border-color: var(--fwl-line)",
+            "color: var(--fwl-ink)",
+        ],
+    ),
+    ([".footnote-preview::before"], ["border-bottom-color: var(--fwl-line)"]),
+    ([".footnote-preview.is-above::before"], ["border-top-color: var(--fwl-line)"]),
+    (
         [".content section.footnotes a.tag.is-link:not(body)"],
         ["background-color: var(--fwl-sub)", "color: var(--fwl-link)"],
     ),
@@ -269,7 +283,15 @@ _RULES = [
             "box-shadow: none",
         ],
     ),
-    ([".outdated-warning-overlay a", ".dev-warning-overlay a"], ["color: var(--fwl-link)"]),
+    (
+        [
+            ".outdated-warning-overlay a",
+            ".outdated-warning-overlay a:hover",
+            ".dev-warning-overlay a",
+            ".dev-warning-overlay a:hover",
+        ],
+        ["color: var(--fwl-link)"],
+    ),
     # Sidebar
     (
         [_SB],
@@ -305,13 +327,23 @@ _RULES = [
         ],
         ["background: var(--fwl-bg)", "color: var(--fwl-ink)"],
     ),
-    ([f"{_MENU} li.is-active ul.internal .tocitem:hover"], ["background: var(--fwl-hover)"]),
+    (
+        [f"{_MENU} li.is-active ul.internal .tocitem:hover"],
+        ["background: var(--fwl-hover)", "color: var(--fwl-ink)"],
+    ),
     (
         [f"{_MENU} li.is-active"],
         ["border-top-color: var(--fwl-line)", "border-bottom-color: var(--fwl-line)"],
     ),
     ([f"{_MENU}::-webkit-scrollbar-thumb"], ["background: var(--fwl-line)"]),
     ([f"{_MENU}::-webkit-scrollbar-thumb:hover"], ["background: var(--fwl-muted)"]),
+    (
+        [
+            "#search-modal .modal-card-body::-webkit-scrollbar-thumb",
+            "#search-modal .filter-tabs::-webkit-scrollbar-thumb",
+        ],
+        ["background: var(--fwl-line)"],
+    ),
     (
         [f"{_SB} #documenter-search-query"],
         [
@@ -349,13 +381,19 @@ _RULES = [
         ],
     ),
     (
-        [".control.has-icons-right .icon", ".control.has-icons-left .icon"],
-        ["color: var(--fwl-muted)"],
+        # Bulma sets this utility colour with !important, so only !important beats it.
+        [".modal-card .has-text-primary-dark"],
+        ["color: var(--fwl-link) !important"],
+    ),
+    ([".link-icon", ".link-icon:hover"], ["color: var(--fwl-link)"]),
+    ([".input::placeholder", ".textarea::placeholder"], ["color: var(--fwl-muted)"]),
+    (
+        [".select:not(.is-multiple):not(.is-loading)::after"],
+        ["border-color: var(--fwl-muted)"],
     ),
     (
-        # Bulma sets this utility colour with !important, so only !important beats it.
-        [".has-text-primary-dark"],
-        ["color: var(--fwl-link) !important"],
+        [".select:not(.is-multiple):not(.is-loading):hover::after"],
+        ["border-color: var(--fwl-ink)"],
     ),
     (
         [".input:focus", ".textarea:focus", ".select select:focus"],
@@ -371,15 +409,39 @@ _RULES = [
     ([".search-result-link"], ["color: var(--fwl-ink)"]),
     (
         [".search-result-link:hover", ".search-result-link:focus"],
-        ["background-color: var(--fwl-hover)"],
+        ["background-color: var(--fwl-hover)", "border-color: var(--fwl-line)"],
     ),
+    ([".search-divider"], ["border-bottom-color: var(--fwl-line)"]),
     ([".search-result-title"], ["color: var(--fwl-ink)"]),
     (
         [".property-search-result-badge", ".search-filter"],
         ["background-color: var(--fwl-sub)", "color: var(--fwl-ink)"],
     ),
-    ([".search-filter-selected"], ["background-color: var(--fwl-azure-wash)"]),
-    ([".search-result-highlight"], ["background-color: var(--fwl-amber-wash)"]),
+    (
+        [".search-filter:hover", ".search-filter:focus"],
+        ["background-color: var(--fwl-hover)", "color: var(--fwl-ink)"],
+    ),
+    (
+        [
+            ".search-filter-selected",
+            ".search-filter-selected:hover",
+            ".search-filter-selected:focus",
+        ],
+        ["background-color: var(--fwl-azure-wash)", "color: var(--fwl-ink)"],
+    ),
+    (
+        # The light theme sets these with !important.
+        [
+            f".search-result-link:{state} .{badge}"
+            for state in ("hover", "focus")
+            for badge in ("property-search-result-badge", "search-filter")
+        ],
+        ["background-color: var(--fwl-line) !important", "color: var(--fwl-ink) !important"],
+    ),
+    (
+        [".search-result-highlight"],
+        ["background-color: var(--fwl-amber-wash)", "color: var(--fwl-ink)"],
+    ),
     # Code
     (
         [".content code", ".content kbd:not(body)", ".content samp"],
@@ -399,8 +461,6 @@ _RULES = [
     (["pre .copy-button.error"], ["color: var(--fwl-vermilion)"]),
     ([".content pre code"], ["border: 0"]),
     *[([f".hljs-{token}"], [f"color: var(--fwl-{hue})"]) for token, hue in _SYNTAX.items()],
-    ([".hljs-emphasis"], ["font-style: italic"]),
-    ([".hljs-strong"], ["font-weight: 500"]),
     (["code.language-julia-repl > span.hljs-meta"], ["color: var(--fwl-emerald)"]),
     (
         [".hljs-addition"],
@@ -414,6 +474,10 @@ _RULES = [
     (
         [".admonition"],
         ["border-color: var(--fwl-line)", "background-color: var(--fwl-sub)", "border-radius: 4px"],
+    ),
+    (
+        [".admonition-header .admonition-anchor"],
+        ["color: inherit"],
     ),
     (
         [".admonition > .admonition-header"],
