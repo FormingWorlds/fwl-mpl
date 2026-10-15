@@ -86,7 +86,13 @@ then list the stylesheet in `docs/make.jl`:
 format = Documenter.HTML(; assets = ["assets/fwl.css"])
 ```
 
-The command writes `fwl.css` and the fonts (`fwl-fonts/`, with the OFL licence) into the folder. Keep `documenter-light` as the primary theme and `documenter-dark` as the primary dark theme, which is the Documenter default; the stylesheet follows the reader's choice in the settings dialog. Text and link colours are the palette hues moved toward the ink colour until they reach 4.5:1 contrast on the page and on the code background; admonition borders and fills use the unmodified palette. The stylesheet was checked against Documenter.jl 1.19.
+The command writes `fwl.css` and the fonts (`fwl-fonts/`, about 1 MB, with the OFL licence) into the folder and replaces earlier copies; run it again after updating `fwl-mpl` so the pages follow palette changes.
+
+The stylesheet applies to the Documenter light and dark themes, whether the reader's system setting picks them or the reader chooses one in the settings dialog. The catppuccin themes in that dialog keep their own colours. Keep `documenter-light` as the primary theme and `documenter-dark` as the primary dark theme, which is the Documenter default.
+
+Text and link colours are the palette hues moved toward the ink colour until they reach 4.5:1 contrast on every surface they appear on: the page, the code and sidebar backgrounds, and the admonition fills. Admonition borders use the unmodified palette, and their fills a 10 % tint of it; custom and `details` admonitions use the neutral colours. IBM Plex Mono comes in one weight without italic, and the stylesheet turns off synthetic bold and italic, so code comments are upright.
+
+The selectors follow the class names of Documenter.jl 1.19. A later Documenter release can rename classes and leave single elements in the stock colours.
 
 ## Math and symbols
 

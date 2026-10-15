@@ -24,11 +24,21 @@ def test_mix_end_points_and_midpoint():
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_text_colours_reach_aa_on_both_surfaces(mode):
+def test_text_colours_reach_aa_on_every_surface(mode):
     t = docs_theme._tokens(mode)
+    surfaces = [t["bg"], t["sub"], t["hover"], *t["washes"].values()]
+    assert len(surfaces) == 11
     for name, colour in {**t["safe"], "muted": t["muted"], "ink": t["ink"]}.items():
-        for surface in (t["bg"], t["sub"]):
+        for surface in surfaces:
             assert docs_theme.contrast(colour, surface) >= 4.5, name
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_washes_in_the_stylesheet_are_the_ones_checked(mode):
+    css = docs_theme.documenter_css()
+    block = css.split(docs_theme._MODE_SELECTOR[mode] + " {\n", 1)[1].split("}\n", 1)[0]
+    for name, wash in docs_theme._tokens(mode)["washes"].items():
+        assert f"--fwl-{name}-wash: {wash};" in block
 
 
 @pytest.mark.parametrize("mode", MODES)
@@ -67,15 +77,56 @@ def test_every_variable_used_is_defined():
     assert used <= defined
 
 
-def test_every_rule_sits_under_the_two_mode_scope():
+def _blocks(css):
+    """Split the stylesheet into (selector text, body) pairs, header comment removed."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return [(m[1].strip(), m[2]) for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css)]
+
+
+def test_stylesheet_structure_and_scope():
+    blocks = _blocks(docs_theme.documenter_css())
+    faces = [b for b in blocks if b[0] == "@font-face"]
+    modes = [b for b in blocks if b[0] in docs_theme._MODE_SELECTOR.values()]
+    rules = [b for b in blocks if b not in faces and b not in modes]
+    assert (len(faces), len(modes), len(rules)) == (5, 2, len(docs_theme._RULES))
+    for selector, body in rules:
+        for line in selector.split(",\n"):
+            assert line.startswith(docs_theme._SCOPE + " "), line
+        decls = [d.strip() for d in body.strip().split(";") if d.strip()]
+        assert decls and all(re.fullmatch(r"[a-z-]+: .+", d) for d in decls), selector
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_mode_block_sets_page_background_and_no_faux_styles(mode):
+    blocks = dict(_blocks(docs_theme.documenter_css()))
+    body = blocks[docs_theme._MODE_SELECTOR[mode]]
+    assert "background-color: var(--fwl-bg);" in body
+    assert "font-synthesis: none;" in body
+
+
+def test_admonition_kinds_are_the_ones_documenter_emits():
+    # Documenter 1.19 HTMLWriter: note/info -> is-info, tip -> is-success, plus
+    # is-warning, is-danger, is-compat, is-todo; anything else gets no kind class.
+    assert set(docs_theme._ADMONITIONS) == {
+        "info",
+        "success",
+        "warning",
+        "danger",
+        "compat",
+        "todo",
+    }
     css = docs_theme.documenter_css()
-    body = css.split("}\n", 3 + len(docs_theme._FONT_FACES))[-1]
-    selectors = [b.split("{")[0] for b in body.split("}\n") if "{" in b]
-    selectors = [s for s in selectors if not s.lstrip().startswith("html")]
-    assert selectors
-    for sel in selectors:
-        for line in sel.strip().split(",\n"):
-            assert line.startswith(docs_theme._SCOPE), line
+    assert f"{docs_theme._SCOPE} .admonition {{" in css
+    for kind, hue in docs_theme._ADMONITIONS.items():
+        rule = css.split(f"{docs_theme._SCOPE} .admonition.is-{kind} {{", 1)[1].split("}", 1)[0]
+        assert f"border-color: var(--fwl-{hue}-fill);" in rule
+        assert f"background-color: var(--fwl-{hue}-wash);" in rule
+
+
+def test_header_names_the_package_and_documenter_versions():
+    head = docs_theme.documenter_css().splitlines()[0]
+    assert f"fwl-mpl {fwl_mpl.__version__}" in head
+    assert "Documenter.jl 1.19" in head
 
 
 def test_font_files_named_in_the_stylesheet_ship_with_the_package():
@@ -126,6 +177,28 @@ def test_light_theme_is_scoped_by_absence_of_a_theme_class_and_dark_by_its_class
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_text_safe_colours_keep_their_hue_instead_of_collapsing_to_ink(mode):
+def test_text_safe_takes_the_smallest_step_toward_ink(mode):
     t = docs_theme._tokens(mode)
-    assert all(colour != t["ink"] for colour in t["safe"].values())
+    moved = 0
+    for name, hue in t["hues"].items():
+        steps = [docs_theme._mix(hue, t["ink"], k / 100) for k in range(101)]
+        k = steps.index(t["safe"][name])
+        assert k <= 50, name  # still closer to the palette hue than to ink
+        if k:
+            moved += 1
+            prev = steps[k - 1]
+            assert min(docs_theme.contrast(prev, s) for s in t["surfaces"]) < 4.5, name
+    assert moved >= 1
+
+
+def test_light_azure_is_darkened_for_text():
+    # #008FF3 is 3.4:1 on white, below the 4.5:1 that text needs.
+    assert docs_theme.contrast("#008FF3", "#FFFFFF") < 4.5
+    assert docs_theme._tokens("light")["link"] != "#008FF3"
+
+
+def test_install_into_a_file_path_raises(tmp_path):
+    target = tmp_path / "assets"
+    target.write_text("not a folder")
+    with pytest.raises(OSError):
+        docs_theme.install_documenter_theme(target)
