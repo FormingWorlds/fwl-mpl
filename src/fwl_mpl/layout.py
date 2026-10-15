@@ -14,7 +14,7 @@ whose ends carry no number. Moving a legend or a label is left to the author.
 """
 
 import math
-from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, Context, Decimal, localcontext
 
 import matplotlib as mpl
 import numpy as np
@@ -57,11 +57,12 @@ _SNAP = 0.02
 # Rounding may widen an axis or a colour range by at most this fraction of the
 # data span; past it an axis keeps the data limits and a colour bar rounds digits.
 _MAX_GROW = 0.1
-# Colour bar ends are rounded to at most this many digits, the precision of _end_label.
-_MAX_DIGITS = 6
-# A value this close to a rounded value, in units of its last digit, counts as on
-# it; a float32 0.7 is 0.699999988.
-_DIGIT_TOL = Decimal("1e-5")
+# Significant digits of an end label; colour bar ends are rounded to at most this many.
+_LABEL_DIGITS = 6
+# A value within this fraction of a rounded value counts as on it; float32 data
+# are off by up to 6e-8 (a float32 0.7 is 0.699999988).
+_DIGIT_TOL = Decimal("1e-7")
+_DECIMAL = Context(prec=40)
 # Matplotlib widens a colour range narrower than this fraction of its largest end,
 # and replaces one whose ends are both smaller than _SMALLEST.
 _TINY = 1e-15
@@ -87,30 +88,38 @@ def _round_limits(vmin, vmax, log=False):
 
 
 def _round_digits(value, digits, up):
-    """Round ``value`` up or down to ``digits`` significant digits."""
-    if value == 0:
-        return value
-    d = Decimal(repr(float(value)))  # the shortest decimal: 3.3, not 3.29999...
-    exp = d.adjusted() - digits + 1
-    q = d.scaleb(-exp)
-    tol = _DIGIT_TOL if up else -_DIGIT_TOL
-    k = (q - tol).to_integral_value(ROUND_CEILING if up else ROUND_FLOOR)
-    return float(k.scaleb(exp))
+    """Round ``value`` up or down to ``digits`` significant digits.
+
+    A value within _DIGIT_TOL of a rounded value goes to that value, also when it
+    lies on the other side; callers keep the data inside with min and max.
+    """
+    if value == 0 or not math.isfinite(value):
+        return float(value) + 0.0  # -0.0 becomes 0.0
+    with localcontext(_DECIMAL):
+        d = Decimal(repr(float(value)))  # the shortest decimal: 3.3, not 3.29999...
+        exp = d.adjusted() - digits + 1
+        q = d.scaleb(-exp)
+        tol = abs(q) * _DIGIT_TOL
+        k = (q - tol if up else q + tol).to_integral_value(ROUND_CEILING if up else ROUND_FLOOR)
+        return float(k.scaleb(exp))
 
 
 def _singular(vmin, vmax):
     """Return whether a colour bar would widen [vmin, vmax], as matplotlib's nonsingular does."""
+    if not (np.isfinite(vmin) and np.isfinite(vmax)):
+        return True
     big = max(abs(vmin), abs(vmax))
     return big < _SMALLEST or vmax - vmin <= _TINY * big
 
 
 def _digit_limits(vmin, vmax):
-    """Expand a range outward to 2 significant digits per end; return (lo, hi) or None.
+    """Expand a range outward to significant digits per end; return (lo, hi) or None.
 
-    More digits are used when 2 would widen the span by more than _MAX_GROW; None
-    when _MAX_DIGITS still would.
+    The digit count is the smallest from 2 to _LABEL_DIGITS that widens the span
+    by at most _MAX_GROW; None when none does. An end within _DIGIT_TOL of a
+    rounded value keeps the data value.
     """
-    for digits in range(2, _MAX_DIGITS + 1):
+    for digits in range(2, _LABEL_DIGITS + 1):
         lo = min(_round_digits(vmin, digits, up=False), vmin)
         hi = max(_round_digits(vmax, digits, up=True), vmax)
         if hi - lo <= (1 + _MAX_GROW) * (vmax - vmin):
@@ -153,7 +162,7 @@ def _minor_locator(vmin, vmax, nbins, name, ndivs=None):
 
 def _end_label(value, pos=None):
     """Format a tick value compactly, with the typographic minus of the style."""
-    text = format(value, ".6g")
+    text = format(value, f".{_LABEL_DIGITS}g")
     if mpl.rcParams["axes.unicode_minus"]:
         text = text.replace("-", "\N{MINUS SIGN}")
     return text

@@ -284,11 +284,12 @@ def test_colorbar_round_widens_to_tick_values_and_labels_both_ends():
         ((0, 3.3), (0, 3.3), ["0", "1", "2", "3.3"]),
         ((0.000918805, 3.29872), (0.00091, 3.3), ["0.00091", "1", "2", "3.3"]),
         ((2.3, 7.6), (2.3, 7.6), ["2.3", "4", "6", "7.6"]),
+        ((0, 3.6), (0, 3.6), ["0", "1", "2", "3.6"]),  # tick values 0 to 4 widen it by 11 %
         ((-3.29872, -0.000918805), (-3.3, -0.00091), [f"{M}3.3", f"{M}2", f"{M}1", f"{M}0.00091"]),
         ((1001.3, 1008.7), (1001, 1009), ["1001", "1004", "1006", "1009"]),  # not 1000 to 1100
     ],
 )
-def test_colorbar_round_past_a_tenth_rounds_the_ends_to_2_digits(data, clim, labels):
+def test_colorbar_round_past_a_tenth_rounds_the_ends_to_few_digits(data, clim, labels):
     fig, ax = plt.subplots()
     im = ax.imshow(np.linspace(*data, 20).reshape(4, 5))
     cb = fwl_mpl.colorbar(im)
@@ -302,7 +303,7 @@ def test_colorbar_round_past_a_tenth_rounds_the_ends_to_2_digits(data, clim, lab
 def test_colorbar_round_within_a_tenth_keeps_tick_values(data, clim):
     fig, ax = plt.subplots()
     im = ax.imshow(np.linspace(*data, 20).reshape(4, 5))
-    fwl_mpl.colorbar(im)  # 0 to 3.6 widens to 4 by 11 % and gets 2-digit ends above
+    fwl_mpl.colorbar(im)  # 0 to 3.7 widens to 4 by 8 %
     assert im.get_clim() == pytest.approx(clim)
 
 
@@ -334,14 +335,18 @@ def test_colorbar_round_of_a_range_near_the_smallest_float(lo, hi):
     assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
 
 
-def test_colorbar_round_of_float32_data_rounds_to_the_decimal_value():
+@pytest.mark.parametrize(
+    ("lo", "hi", "ends"),
+    [(0.7, 3.3, ("0.7", "3.3")), (7.7, 7.95, ("7.7", "7.95")), (4.43, 4.47, ("4.43", "4.47"))],
+)
+def test_colorbar_round_of_float32_data_rounds_to_the_decimal_value(lo, hi, ends):
     fig, ax = plt.subplots()
-    im = ax.imshow(np.linspace(0.7, 3.3, 20, dtype=np.float32).reshape(4, 5))
+    im = ax.imshow(np.linspace(lo, hi, 20, dtype=np.float32).reshape(4, 5))
     cb = fwl_mpl.colorbar(im)  # float32 0.7 is 0.699999988, which would round down to 0.69
-    assert im.get_clim() == (float(np.float32(0.7)), 3.3)
+    assert im.get_clim() == (float(np.float32(lo)), hi)  # float32 3.3 is below 3.3
     fig.draw_without_rendering()
     labels = [t.get_text() for t in cb.ax.get_yticklabels()]
-    assert (labels[0], labels[-1]) == ("0.7", "3.3")
+    assert (labels[0], labels[-1]) == ends
 
 
 def test_digit_limits_keep_data_a_rounding_error_past_a_rounded_end():
@@ -384,8 +389,62 @@ def test_round_digits_rounds_outward_to_2_digits(value, up, expected):
     assert layout._round_digits(value, 2, up=up) == expected
 
 
-def test_round_digits_keeps_zero_positive():
-    assert math.copysign(1, layout._round_digits(0.0, 2, up=True)) == 1  # not -0.0
+@pytest.mark.parametrize(
+    ("value", "up", "expected"),
+    [
+        (3.3 * (1 + 5e-8), True, 3.3),
+        (3.3 * (1 + 2e-7), True, 3.4),
+        (3.3 * (1 - 5e-8), False, 3.3),
+        (3.3 * (1 - 2e-7), False, 3.2),
+        (-3.3 * (1 + 5e-8), False, -3.3),
+        (-3.3 * (1 + 2e-7), False, -3.4),
+    ],
+)
+def test_round_digits_takes_a_value_within_1e_7_as_the_rounded_value(value, up, expected):
+    assert layout._round_digits(value, 2, up=up) == expected
+
+
+@pytest.mark.parametrize("value", [0.0, -0.0])
+@pytest.mark.parametrize("up", [True, False])
+def test_round_digits_keeps_zero_positive(value, up):
+    assert math.copysign(1, layout._round_digits(value, 2, up=up)) == 1
+
+
+def test_round_digits_passes_non_finite_values_through():
+    assert layout._round_digits(np.inf, 2, up=True) == np.inf
+    assert np.isnan(layout._round_digits(np.nan, 2, up=False))
+
+
+def test_digit_limits_ignore_the_decimal_context_of_the_caller():
+    import decimal
+
+    with decimal.localcontext() as context:
+        context.prec = 2
+        assert layout._digit_limits(1001.3, 1008.7) == (1001, 1009)
+
+
+@pytest.mark.parametrize(
+    ("lo", "hi"),
+    [
+        (1.0, np.nextafter(1.0, 2)),
+        (1.0, 1.0 + 1e-14),
+        (5.0, 5.0),
+        (1e-300, 3.3e-300),
+        (1e-286, 3.3e-286),
+        (0.0, 1.0),
+        (-2.0, -1.0),
+    ],
+)
+def test_singular_matches_the_range_matplotlib_widens(lo, hi):
+    fig, ax = plt.subplots()
+    free = matplotlib.cm.ScalarMappable(norm=matplotlib.colors.Normalize(lo, hi))
+    fig.colorbar(free, ax=ax)
+    widened = (free.norm.vmin, free.norm.vmax) != (lo, hi)
+    assert layout._singular(lo, hi) == widened
+
+
+def test_singular_holds_a_range_with_a_non_finite_end():
+    assert layout._singular(0.0, np.inf) and layout._singular(np.nan, 1.0)
 
 
 def test_colorbar_round_handles_a_log_norm():
