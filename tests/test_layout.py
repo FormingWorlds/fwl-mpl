@@ -445,10 +445,34 @@ def test_colorbar_label_drops_inner_ticks_the_label_cannot_show():
     assert [t.get_text() for t in cb.ax.get_yticklabels()] == [f"{M}8647.37", f"{M}8647.36"]
 
 
+@pytest.mark.parametrize("how", ["axis", "label"])
+def test_inner_ticks_that_print_like_an_end_are_dropped(how):
+    fig, ax = plt.subplots()
+    if how == "axis":
+        ax.plot([0, 1], [1000.0078, 1000.0178])
+        ax.set_ylim(1000.0078, 1000.0178)
+        fwl_mpl.label_ends(ax, "y")
+        target = ax
+    else:  # the end 1000.0078 and a tick at 1000.01 both print as 1000.01
+        im = ax.imshow(np.array([[1000.0078, 1000.0178]]))
+        target = fwl_mpl.colorbar(im, ends="label").ax
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in target.get_yticklabels()] == ["1000.01", "1000.02"]
+
+
+def test_contour_colorbar_keeps_the_inner_ticks_of_its_offset_labels():
+    x, y = np.meshgrid(np.linspace(0, 1, 20), np.linspace(0, 1, 20))
+    fig, ax = plt.subplots()
+    cb = fwl_mpl.colorbar(ax.contourf(x, y, 123456.7 + 0.2 * x))
+    assert len(cb.get_ticks()) > 2  # 123456.75 needs 7 digits, but the offset label shows it
+
+
 def test_end_ticks_keep_the_inner_ticks_the_label_shows():
-    assert list(layout._end_ticks(99999.5, 100000.5)) == pytest.approx(
-        [99999.5, 99999.8, 1e5, 100000.5]
-    )
+    ticks = layout._end_ticks(99999.5, 100000.5)  # 100000.2 needs 7 digits; 100000.5 prints 100000
+    assert list(ticks) == pytest.approx([99999.5, 99999.8, 100000.5])
+    assert len(layout._end_ticks(99999.5, 100000.5, labelled=False)) == 5
+    ticks = layout._end_ticks(1000.0, 1000.021)  # 1000.015 would print like the tick 1000.01
+    assert list(ticks) == pytest.approx([1000.0, 1000.01, 1000.021])
 
 
 @pytest.mark.parametrize(

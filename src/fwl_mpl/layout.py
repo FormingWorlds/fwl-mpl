@@ -142,10 +142,12 @@ def _digit_limits(vmin, vmax):
     return None
 
 
-def _end_ticks(vmin, vmax, nbins=5, log=False):
+def _end_ticks(vmin, vmax, nbins=5, log=False, labelled=True):
     """Ticks inside [vmin, vmax] plus both ends; drop inner ticks that crowd an end.
 
     On a logarithmic scale the inner ticks are powers of ten, spaced in decades.
+    With ``labelled`` (the ticks get _end_label), a linear scale also drops inner
+    ticks that the label cannot show exactly or that print like an end.
     """
     if log:
         lo, hi = math.log10(vmin), math.log10(vmax)
@@ -157,12 +159,15 @@ def _end_ticks(vmin, vmax, nbins=5, log=False):
     step = ticks[1] - ticks[0] if len(ticks) > 1 else (hi - lo)
     keep = inner[(inner - lo > _CROWD * step) & (hi - inner > _CROWD * step)]
     if not log:
-        # A 6-digit label shows 1000.005 as 1000.01, the label of an end.
-        keep = keep[np.array([_label_is_exact(t) for t in keep], dtype=bool)]
         # An end that is zero but for rounding error is labelled 0.
         noise = 64 * np.finfo(float).eps * max(abs(vmin), abs(vmax))
         vmin = 0.0 if abs(vmin) <= noise else vmin
         vmax = 0.0 if abs(vmax) <= noise else vmax
+    if not log and labelled:
+        # A 6-digit label shows 1000.005, and an end at 1000.0078, as 1000.01.
+        ends = {_end_label(vmin), _end_label(vmax)}
+        exact = [_label_is_exact(t) and _end_label(t) not in ends for t in keep]
+        keep = keep[np.array(exact, dtype=bool)]
     return np.concatenate([[vmin], 10.0**keep if log else keep, [vmax]])
 
 
@@ -207,8 +212,9 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         contour set keeps its levels, and other norms keep their range, with
         the end values as ticks. ``"label"`` keeps the range and adds the end
         values as ticks, labelled to 6 significant digits; use it when the
-        range itself matters, such as a symmetric diverging range. Inner ticks
-        that a 6-digit label cannot show are left out.
+        range itself matters, such as a symmetric diverging range. With a
+        6-digit label, inner ticks that it cannot show, or that print like an
+        end, are left out.
     **kwargs
         Passed to ``Figure.colorbar`` (``cax``, ``label``, ``pad``, ``shrink``,
         ...). ``ticks`` and ``format`` given here are kept.
@@ -257,7 +263,7 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         vmin, vmax = lo, hi
         mappable.set_clim(vmin, vmax)
     else:
-        ticks = _end_ticks(vmin, vmax, log=log)
+        ticks = _end_ticks(vmin, vmax, log=log, labelled=exact)
     cb = np.ravel(host)[0].figure.colorbar(mappable, ax=ax, **kwargs)
     cb.outline.set_visible(False)
     if "ticks" not in kwargs:
@@ -273,8 +279,9 @@ def label_ends(ax, axis="both"):
 
     Call it after the last change to the limits: the ticks it sets are fixed.
     On a logarithmic axis the inner ticks are powers of ten and minor ticks carry
-    no label. Default minor ticks of a linear axis follow the step of the inner
-    major ticks.
+    no label. On a linear axis, inner ticks that a 6-digit label cannot show, or
+    that print like an end, are left out, and default minor ticks follow the
+    step of the major tick grid.
 
     Parameters
     ----------
