@@ -651,3 +651,28 @@ def test_text_and_legend_of_a_subfigure_are_checked():
     found = _collisions(fig)
     assert "text 'on the line' overlaps Line2D 'level'" in found
     assert "legend overlaps Line2D 'level'" in found
+
+
+@pytest.mark.parametrize(("lo", "hi"), [(0.3, 0.7), (0.7, 1.1), (1.2, 1.6), (1.4, 1.8)])
+def test_round_limits_of_a_range_whose_ends_are_inexact_ticks(lo, hi):
+    # MaxNLocator gives 0.30000000000000004 for 0.3, just above the data.
+    vmin, vmax, ticks = layout._round_limits(lo, hi)
+    assert vmin <= lo and vmax >= hi
+    assert ticks[[0, -1]] == pytest.approx([vmin, vmax])
+
+
+def test_colorbar_for_a_mappable_without_data_spans_0_to_1():
+    fig, ax = plt.subplots()
+    lone = matplotlib.cm.ScalarMappable(cmap=fwl_mpl.cmap("sequential"))
+    cb = fwl_mpl.colorbar(lone, ax=ax)
+    assert lone.get_clim() == (0, 1)
+    assert cb.get_ticks()[[0, -1]] == pytest.approx([0, 1])
+
+
+def test_ends_of_a_log_axis_are_compared_in_decades():
+    fig, ax = plt.subplots()
+    ax.plot([1, 2], [3e-5, 5e3])
+    ax.set(xlim=(1, 2), yscale="log", ylim=(2e-5, 1e4))
+    # In linear units the tick at 1e-4 is within 1e-6 of the span from 2e-5.
+    assert fwl_mpl.check_figure(fig) == ["axes 0: y axis lower end 2e-05 has no tick label"]
+    assert fwl_mpl.finish(fig) == []

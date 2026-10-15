@@ -69,9 +69,10 @@ def _round_limits(vmin, vmax, log=False):
         ticks = LogLocator().tick_values(lo, hi)
         return lo, hi, ticks[(ticks >= lo) & (ticks <= hi)]
     ticks = _nice_ticks(vmin, vmax)
-    lo = ticks[ticks <= vmin].max()
-    hi = ticks[ticks >= vmax].min()
-    return lo, hi, ticks[(ticks >= lo) & (ticks <= hi)]
+    tol = 1e-9 * (vmax - vmin)  # a tick at 0.30000000000000004 counts as 0.3
+    lo = min(ticks[ticks <= vmin + tol].max(), vmin)
+    hi = max(ticks[ticks >= vmax - tol].min(), vmax)
+    return lo, hi, ticks[(ticks >= lo - tol) & (ticks <= hi + tol)]
 
 
 def _end_ticks(vmin, vmax, nbins=5, log=False):
@@ -144,8 +145,11 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         ax = getattr(mappable, "axes", None)
     if ax is None:
         raise ValueError("the mappable is on no axes; pass ax")
-    mappable.autoscale_None()
+    if mappable.get_array() is not None:
+        mappable.autoscale_None()
     norm = mappable.norm
+    if not norm.scaled():
+        mappable.set_clim(0, 1)  # as Figure.colorbar does for a mappable without data
     vmin, vmax = norm.vmin, norm.vmax
     log = isinstance(norm, LogNorm)
     if (
@@ -310,12 +314,19 @@ def round_limits(ax, axis="both"):
             ax_.set_major_locator(FixedLocator(start + step * np.arange(n + 1)))
 
 
+def _at_ends(axis, values):
+    """Return whether one of ``values`` lies on the lower and on the upper end of the axis."""
+    lo, hi = sorted(axis.get_view_interval())
+    v = np.asarray(list(values), dtype=float)
+    if axis.get_scale() == "log":  # compare in decades
+        v, lo, hi = np.log10(v[v > 0]), math.log10(lo), math.log10(hi)
+    tol = _END_TOL * (hi - lo)
+    return tuple(bool(np.any(np.abs(v - end) <= tol)) for end in (lo, hi))
+
+
 def _ends_on_ticks(ax, name):
     axis = getattr(ax, f"{name}axis")
-    lo, hi = sorted(axis.get_view_interval())
-    ticks = np.asarray(axis.get_major_locator()())
-    tol = _END_TOL * (hi - lo)
-    return all(np.any(np.abs(ticks - v) <= tol) for v in (lo, hi))
+    return all(_at_ends(axis, axis.get_major_locator()()))
 
 
 def _snap_to_ticks(ax, name):
@@ -595,10 +606,14 @@ def _unlabelled_ends(fig):
                 if (tick.label1.get_visible() and tick.label1.get_text())
                 or (tick.label2.get_visible() and tick.label2.get_text())
             }
-            lo, hi = sorted(axis.get_view_interval())
-            span = hi - lo
-            for end, value in (("lower", lo), ("upper", hi)):
-                if not any(abs(s - value) <= _END_TOL * span for s in shown):
+            ends = zip(
+                ("lower", "upper"),
+                sorted(axis.get_view_interval()),
+                _at_ends(axis, shown),
+                strict=True,
+            )
+            for end, value, labelled in ends:
+                if not labelled:
                     problems.append(
                         f"axes {n}: {name} axis {end} end {value:.6g} has no tick label"
                     )
