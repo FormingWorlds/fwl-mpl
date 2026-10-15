@@ -253,7 +253,9 @@ def panel_label(ax, label, **kwargs):
     label : str
     **kwargs
         Text properties, aliases such as ``size`` included; they override the
-        defaults. On 3D axes the label is placed with ``text2D``.
+        defaults. A ``fontdict`` is read as well, with ``kwargs`` winning. A
+        ``fontproperties`` object replaces the default size and weight. On 3D axes
+        the label is placed with ``text2D``.
 
     Returns
     -------
@@ -266,10 +268,18 @@ def panel_label(ax, label, **kwargs):
         "fontweight": "medium",
         "fontsize": mpl.rcParams["axes.titlesize"],
     }
-    opts.update(cbook.normalize_kwargs(kwargs, Text))
+    user = cbook.normalize_kwargs(kwargs, Text)
+    fontdict = cbook.normalize_kwargs(user.pop("fontdict", None), Text)
+    user = {**fontdict, **user}
+    if "fontproperties" in user:
+        del opts["fontsize"], opts["fontweight"]
+    opts.update(user)
     text = getattr(ax, "text2D", ax.text)
     return text(-0.02, 1.03, label, **opts)
 
 
 register_fonts()
-logging.getLogger("matplotlib.font_manager").addFilter(_FILTER)
+_logger = logging.getLogger("matplotlib.font_manager")
+for _old in [f for f in _logger.filters if type(f).__name__ == "_QuietFallbackWeight"]:
+    _logger.removeFilter(_old)
+_logger.addFilter(_FILTER)

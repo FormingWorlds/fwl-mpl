@@ -1,8 +1,10 @@
 """Style sheets, fonts, the public helpers, and the rendered output."""
 
+import importlib
 import io
 import json
 import logging
+import os
 import re
 import struct
 import subprocess
@@ -102,7 +104,9 @@ def test_use_applies_mode(mode):
     cycle = [hx(c) for c in mpl.rcParams["axes.prop_cycle"].by_key()["color"]]
     assert cycle == fwl_mpl.colors(mode=mode)
     assert mpl.rcParams["pdf.fonttype"] == 42
+    assert mpl.rcParams["ps.fonttype"] == 42
     assert mpl.rcParams["svg.fonttype"] == "path"
+    assert mpl.rcParams["mathtext.fallback"] == "stixsans"
     assert hx(mpl.rcParams["axes.facecolor"]) == fwl_mpl.SURFACES[mode]["background"]
 
 
@@ -132,8 +136,14 @@ def test_style_sheet_works_without_use():
         "same = mpl.colormaps[name](0.3) == cmc.batlow(0.3); "
         "print(json.dumps([name, same, p]))"
     )
+    env = {**os.environ, "PYTHONPATH": str(FONTS.parents[1])}
     out = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=120
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=120,
+        env=env,
     )
     cmap_name, same, path = json.loads(out.stdout.strip().splitlines()[-1])
     assert cmap_name == "cmc.batlow"
@@ -191,7 +201,34 @@ def test_bundled_mono_resolves():
     assert Path(path).resolve() == (FONTS / "IBMPlexMono-Regular.ttf").resolve()
 
 
-@pytest.mark.parametrize("fname", ["IBMPlexSans-Regular.ttf", "IBMPlexSans-Italic.ttf"])
+SANS_FILES = [
+    "IBMPlexSans-Regular.ttf",
+    "IBMPlexSans-Italic.ttf",
+    "IBMPlexSans-Medium.ttf",
+    "IBMPlexSans-MediumItalic.ttf",
+]
+# Greek commands whose code point the bundled font lacks; the README lists them.
+GREEK_NOT_IN_PLEX = {
+    "backepsilon",
+    "digamma",
+    "phi",
+    "varkappa",
+    "varpi",
+    "varrho",
+    "vartheta",
+}
+
+
+@pytest.mark.parametrize("fname", SANS_FILES)
+def test_greek_commands_missing_from_the_font_are_the_documented_ones(fname):
+    from matplotlib._mathtext_data import tex2uni
+
+    charmap = FT2Font(str(FONTS / fname)).get_charmap()
+    greek = {k: v for k, v in tex2uni.items() if 0x0370 <= v <= 0x03FF}
+    assert {k for k, v in greek.items() if v not in charmap} == GREEK_NOT_IN_PLEX
+
+
+@pytest.mark.parametrize("fname", SANS_FILES)
 def test_bundled_sans_covers_greek_and_symbols(fname):
     charmap = FT2Font(str(FONTS / fname)).get_charmap()
     assert [c for c in GREEK + SYMBOLS if ord(c) not in charmap] == []
@@ -265,10 +302,18 @@ def test_fallback_weight_notice_is_filtered_for_real_lookups(caplog):
     finally:
         logger.addFilter(fwl_mpl._FILTER)
         fm._findfont_cached.cache_clear()
-    # Versions without the notice log nothing either way.
+    if not unfiltered:
+        pytest.skip("this matplotlib logs no fallback-weight notice for DejaVu Sans")
     assert filtered == []
-    if unfiltered:
-        assert not fwl_mpl._FILTER.filter(unfiltered[0])
+    assert not fwl_mpl._FILTER.filter(unfiltered[0])
+
+
+def test_reloading_the_package_keeps_one_filter():
+    logger = logging.getLogger("matplotlib.font_manager")
+    before = len(logger.filters)
+    importlib.reload(fwl_mpl)
+    assert len(logger.filters) == before
+    assert fwl_mpl._FILTER in logger.filters
 
 
 def test_fallback_weight_filter_message_forms():
@@ -349,6 +394,19 @@ def test_panel_label_defaults_and_override():
     assert t2.get_color() == "red"
     assert t2.get_fontsize() == pytest.approx(12)
     assert t2.get_fontweight() == "bold"
+
+
+def test_panel_label_honours_fontproperties_and_fontdict():
+    fwl_mpl.use()
+    fig, ax = plt.subplots()
+    props = font_manager.FontProperties(size=14, weight="bold")
+    t = fwl_mpl.panel_label(ax, "a", fontproperties=props)
+    assert (t.get_fontsize(), t.get_fontweight()) == (14.0, "bold")
+    t = fwl_mpl.panel_label(ax, "b", fontdict={"size": 13, "color": "red"})
+    assert (t.get_fontsize(), t.get_color()) == (13.0, "red")
+    t = fwl_mpl.panel_label(ax, "c", fontdict={"size": 13}, size=11)
+    assert t.get_fontsize() == 11.0
+    assert fwl_mpl.panel_label(ax, "d").get_fontweight() == "medium"
 
 
 def test_panel_label_on_3d_axes():

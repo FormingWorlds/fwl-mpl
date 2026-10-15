@@ -15,6 +15,8 @@ CVD = [None] + [
     for t in ("deuteranomaly", "protanomaly", "tritanomaly")
 ]
 MIN_DELTA_E = 12.0
+# Lowest value over partial severities (dark mode, protanomaly, 92 %); see the README.
+PARTIAL_SEVERITY_FLOOR = 11.8
 MIN_CONTRAST = {"light": 3.0, "dark": 4.5}
 
 
@@ -95,3 +97,45 @@ def test_observed_colour_separates_from_palette(mode):
 @pytest.mark.parametrize("mode", fwl_mpl.MODES)
 def test_palette_separation_under_cvd(mode):
     assert min_delta_e(fwl_mpl.colors(mode=mode)) >= MIN_DELTA_E
+
+
+@pytest.mark.parametrize("mode", fwl_mpl.MODES)
+def test_palette_separation_stays_above_the_documented_floor_at_partial_severity(mode):
+    cols = np.array([rgb(h) for h in fwl_mpl.colors(mode=mode)])
+    for kind in ("deuteranomaly", "protanomaly", "tritanomaly"):
+        for severity in range(2, 101, 2):
+            cvd = {"name": "sRGB1+CVD", "cvd_type": kind, "severity": severity}
+            sim = np.clip(cspace_convert(cols, cvd, "sRGB1"), 0, 1)
+            ucs = cspace_convert(sim, "sRGB1", "CAM02-UCS")
+            worst = min(
+                float(np.linalg.norm(ucs[i] - ucs[j])) for i, j in combinations(range(8), 2)
+            )
+            assert worst >= PARTIAL_SEVERITY_FLOOR, (kind, severity, worst)
+
+
+# Okabe-Ito, 7 colours without black.
+OKABE_ITO = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"]
+
+
+@pytest.mark.parametrize(
+    ("hexes", "expected"),
+    [
+        (fwl_mpl.colors(mode="light"), 12.6),
+        (fwl_mpl.colors(mode="dark"), 12.3),
+        (OKABE_ITO, 11.0),
+    ],
+    ids=["light", "dark", "okabe-ito"],
+)
+def test_readme_minimum_separation_numbers(hexes, expected):
+    assert min_delta_e(hexes) == pytest.approx(expected, abs=0.05)
+
+
+def test_tritan_confusion_canary():
+    # Yellow and pink are close for tritans and far apart for normal vision.
+    pair = ["#F0E442", "#FF9EB5"]
+    tritan = {"name": "sRGB1+CVD", "cvd_type": "tritanomaly", "severity": 100}
+    cols = np.array([rgb(h) for h in pair])
+    plain = np.linalg.norm(np.diff(cspace_convert(cols, "sRGB1", "CAM02-UCS"), axis=0))
+    sim = np.clip(cspace_convert(cols, tritan, "sRGB1"), 0, 1)
+    seen = np.linalg.norm(np.diff(cspace_convert(sim, "sRGB1", "CAM02-UCS"), axis=0))
+    assert seen < plain

@@ -58,7 +58,7 @@ pyimport("fwl_mpl").use()
 
 `fwl_mpl.colors(n, mode)` gives the first `n` colours of a cycle, `fwl_mpl.PALETTE[mode][name]` a single colour by name, and `fwl_mpl.SURFACES[mode]` the neutral colours: `background`, `ink` (text and boxplots), `muted` (axes and ticks), `line` (grid) and `observed` (measured data points, the same colour as `ink`).
 
-Each mode has its own palette. In each one, the closest pair of colours is at least CAM02-UCS ΔE 12 apart for normal vision and for full-severity deuteranomaly, protanomaly and tritanomaly (simulated with `colorspacious`); the measured minimum is 12.6 in light mode and 12.3 in dark mode. With the same measure, the 7-colour Okabe-Ito palette (without black) scores 11.0. The `observed` colour is at least ΔE 12 from every palette colour too. Every colour has at least 3:1 contrast against the light background and 4.5:1 against the dark one. The tests check these limits.
+Each mode has its own palette. In each one, the closest pair of colours is at least CAM02-UCS ΔE 12 apart for normal vision and for full-severity deuteranomaly, protanomaly and tritanomaly (simulated with `colorspacious`); the measured minimum is 12.6 in light mode and 12.3 in dark mode. At partial severities, sampled in steps of 1 %, the minimum is lower: 12.2 in light mode (deuteranomaly at 88 %) and 11.9 in dark mode (protanomaly at 92 %). With the same measure, the 7-colour Okabe-Ito palette (without black) scores 11.0. The `observed` colour is at least ΔE 12 from every palette colour too. Every colour has at least 3:1 contrast against the light background and 4.5:1 against the dark one. The tests check these limits.
 
 For more than 8 series, vary the line style or use a sequential colour map.
 
@@ -74,7 +74,7 @@ For more than 8 series, vary the line style or use a sequential colour map.
 
 ## Math and symbols
 
-Math text uses IBM Plex Sans with its italic for variables and upright text for `\mathrm{}`. IBM Plex Sans covers the Greek alphabet with one exception: matplotlib draws `\phi` as ϕ (U+03D5), which the font lacks, so write `\varphi` for φ. Glyphs the font does not have, such as ∇, ∝, ⊕ and ☉, come from STIX Sans in math and from DejaVu Sans in plain text. Write `M_\mathrm{Earth}` rather than `M_\oplus`. With matplotlib 3.8 or newer, `fwl_mpl.use()` also sets bold italic math (`\mathbfit`) to IBM Plex Sans Medium Italic. IBM Plex has no calligraphic letters, so `\mathcal` draws the italic.
+Math text uses IBM Plex Sans with its italic for variables and upright text for `\mathrm{}`. IBM Plex Sans covers the Greek alphabet with one exception that matters in practice: matplotlib draws `\phi` as ϕ (U+03D5), which the font lacks, so write `\varphi` for φ. The variant forms `\vartheta`, `\varpi`, `\varrho` and `\varkappa` and the archaic `\digamma` and `\backepsilon` are missing too and come from STIX Sans. Glyphs the font does not have, such as ∇, ∝, ⊕ and ☉, come from STIX Sans in math and from DejaVu Sans in plain text. Write `M_\mathrm{Earth}` rather than `M_\oplus`. With matplotlib 3.8 or newer, `fwl_mpl.use()` also sets bold italic math (`\mathbfit`) to IBM Plex Sans Medium Italic. IBM Plex has no calligraphic letters, so `\mathcal` draws the italic.
 
 ## Example
 
