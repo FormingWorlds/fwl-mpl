@@ -16,7 +16,7 @@ svg.fonttype: path
 ## Type: IBM Plex Sans with true italic for math variables
 font.family: IBM Plex Sans, DejaVu Sans
 font.monospace: IBM Plex Mono, DejaVu Sans Mono
-font.size: 8
+font.size: 8.5
 mathtext.fontset: custom
 mathtext.rm: IBM Plex Sans
 mathtext.sf: IBM Plex Sans
@@ -50,15 +50,15 @@ axes.spines.top: False
 axes.spines.right: False
 axes.linewidth: 0.6
 axes.grid: False
-axes.titlesize: 8.5
+axes.titlesize: 9.5
 axes.titleweight: medium
 axes.titlelocation: left
-axes.labelsize: 8
+axes.labelsize: 9
 axes.labelpad: 3
 xtick.direction: out
 ytick.direction: out
-xtick.labelsize: 7
-ytick.labelsize: 7
+xtick.labelsize: 8
+ytick.labelsize: 8
 xtick.major.size: 3
 ytick.major.size: 3
 xtick.minor.size: 1.6
@@ -79,7 +79,7 @@ scatter.edgecolors: face
 
 ## Legend
 legend.frameon: False
-legend.fontsize: 7
-legend.title_fontsize: 7
+legend.fontsize: 8
+legend.title_fontsize: 8
 legend.handlelength: 1.4
 legend.borderaxespad: 0.3

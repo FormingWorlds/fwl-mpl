@@ -388,7 +388,7 @@ def test_panel_label_defaults_and_override():
     assert t.get_horizontalalignment() == "right"
     assert t.get_verticalalignment() == "bottom"
     assert t.get_fontweight() in ("medium", 500)
-    assert t.get_fontsize() == pytest.approx(8.5)
+    assert t.get_fontsize() == pytest.approx(9.5)
     t2 = fwl_mpl.panel_label(ax, "c", ha="left", color="red", size=12, weight="bold")
     assert t2.get_horizontalalignment() == "left"
     assert t2.get_color() == "red"
@@ -425,3 +425,12 @@ def test_bold_italic_math_uses_plex():
     fig = plt.figure()
     fig.text(0.1, 0.5, r"$\mathbfit{x}$")
     assert pdf_fonts(fig) == {b"IBMPlexSans-MedmItalic"}
+
+
+@pytest.mark.parametrize("mode", fwl_mpl.MODES)
+def test_text_sizes_are_the_ones_the_readme_states(mode):
+    fwl_mpl.use(mode)
+    rc = mpl.rcParams
+    sizes = [rc[k] for k in ("xtick.labelsize", "ytick.labelsize", "legend.fontsize")]
+    assert sizes == [8, 8, 8]
+    assert (rc["axes.labelsize"], rc["axes.titlesize"]) == (9, 9.5)

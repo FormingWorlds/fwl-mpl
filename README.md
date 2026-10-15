@@ -28,11 +28,14 @@ fig, ax = plt.subplots()
 ax.plot(t, T)  # lines follow the 8-colour cycle
 ax.set_xlabel(r"Time, $t$ (Myr)")
 fwl_mpl.panel_label(ax, "a")
+problems = fwl_mpl.finish(fig)  # labelled axis ends, then a layout check
+assert not problems, "\n".join(problems)
+fig.savefig("figure.pdf")
 ```
 
 The style sheets also work on their own: `plt.style.use("fwl_mpl.light")` or `plt.style.use("fwl_mpl.dark")`.
 
-The default figure is 3.5 by 2.6 inches, for one column of a two-column page. A figure across both columns of an AASTeX page is 7.1 inches wide. The saved file keeps the figure size. PDF and PostScript output embed the fonts as TrueType; SVG output draws text as paths, so it shows the same type where the fonts are not installed.
+The default figure is 3.5 by 2.6 inches, for one column of a two-column page. A figure across both columns of an AASTeX page is 7.1 inches wide. The saved file keeps the figure size. Tick labels and legends are 8 pt, axis labels 9 pt and panel labels 9.5 pt. PDF and PostScript output embed the fonts as TrueType; SVG output draws text as paths, so it shows the same type where the fonts are not installed.
 
 ### From Julia
 
@@ -42,6 +45,23 @@ Erebus.jl and other Julia code plot through PyPlot, which runs matplotlib in the
 using PyCall
 pyimport("fwl_mpl").use()
 ```
+
+## Layout rules
+
+Lab figures follow 2 rules:
+
+1. Text never sits on data. Legends, labels, annotations and tick labels do not overlap lines, markers, error bars, axis lines or other text.
+2. Both ends of every axis and of every colour bar carry a number, so a reader sees the range they cover.
+
+`fwl_mpl.finish(fig)` applies the second rule and checks both; call it after the last change to the figure and before saving. It returns a list of the problems that remain, one line each, and an empty list for a figure that follows the rules. In detail:
+
+- An axis with automatic limits gets an even tick grid just outside its data. The tick step is the coarsest of 1, 2, 2.5 and 5 times a power of ten that widens the data range by at most 10 % and fits the axis length; on a short axis, ticks go on every few grid lines, at even spacing and on both limits. Logarithmic axes go to whole decades. A shared or twin axis covers the data of every axes that shares it, and an inverted axis stays inverted.
+- An axis with limits set by hand, or one whose data allow no such grid, gets its exact end values as labelled ticks (`fwl_mpl.label_ends(ax)` does this alone); on a logarithmic axis, powers of ten go between the ends and the default minor labels are turned off. `ax.set_ylim(bottom=0)` sets both limits by hand, so the other end gets its exact value too; set both limits to tick values for round ends. Axes that hold an image, a mesh or filled contours (for `pcolor` and `contourf`, matplotlib 3.8 and later) keep their data limits, moved onto a tick when it lies within 2 % of the range.
+- Markers of a series that lies inside its axes are drawn whole, so a point on an axis limit is not cut in half (a clip path set by hand stays); they stay unclipped if the limits change later. Inset axes follow the same rules. Secondary axes keep their own ticks and are not checked for labelled ends.
+- An axis with its own tick locator or formatter, for example integer ticks or percent labels, keeps its ticks, and `finish` reports its unlabelled ends; set the limits to tick values to clear them. An axis with dates or categories keeps its ticks and is not checked for labelled ends.
+- A colour bar made with `fig.colorbar` whose ends carry no tick gets its end values as ticks, unless its ticks or format were set by hand; `finish` then reports its unlabelled ends. Use `fwl_mpl.colorbar` instead to choose: `fwl_mpl.colorbar(im)` widens the colour range outward to tick values (linear and logarithmic norms; a contour set keeps its levels), and `fwl_mpl.colorbar(im, ends="label")` keeps the range, for example a symmetric diverging one, and labels its exact ends.
+
+Placing text is left to the author. When `finish` reports a collision, move the legend to where the data leave room (`loc=`), make that room with a wider axis range whose limit is a tick value, put the legend outside the axes, or shorten the label. `fwl_mpl.check_figure(fig)` runs the check alone. It tests rotated text by its axis-aligned bounding box, so rotated labels need clear space, and it tests an annotation by its text, not its arrow. It does not treat filled areas (bars and histograms included) or images as obstacles, nor data hidden behind an inset with an opaque background, and it does not test polar, 3D and secondary axes, or axes with dates or categories, for labelled ends. The specimen at the top passes it in both modes, and a test keeps it that way.
 
 ## Colours
 
