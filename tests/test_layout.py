@@ -1,5 +1,6 @@
 """Layout rules: the collision checker, labelled axis ends and colour bars."""
 
+import math
 import runpy
 from pathlib import Path
 
@@ -297,31 +298,73 @@ def test_colorbar_round_past_a_tenth_rounds_the_ends_to_2_digits(data, clim, lab
     assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
 
 
-def test_colorbar_round_keeps_the_grid_on_a_range_matplotlib_would_widen():
+@pytest.mark.parametrize(("data", "clim"), [((0, 0.384), (0, 0.4)), ((0, 3.7), (0, 4))])
+def test_colorbar_round_within_a_tenth_keeps_tick_values(data, clim):
     fig, ax = plt.subplots()
-    im = ax.imshow(np.linspace(1.0, np.nextafter(1.0, 2), 20).reshape(4, 5))
-    lo, hi, _ = layout._round_limits(*im.get_clim())
-    fwl_mpl.colorbar(im)
-    assert im.get_clim() == (lo, hi)
+    im = ax.imshow(np.linspace(*data, 20).reshape(4, 5))
+    fwl_mpl.colorbar(im)  # 0 to 3.6 widens to 4 by 11 % and gets 2-digit ends above
+    assert im.get_clim() == pytest.approx(clim)
+
+
+@pytest.mark.parametrize(
+    ("data", "clim"),
+    [
+        ((1.0, np.nextafter(1.0, 2)), (1.0, 1.00000000000005)),
+        ((1000.0123, 1000.0456), (1000.01, 1000.05)),  # needs 7 digits
+        ((1000001.234, 1000001.9), (1000001.2, 1000002.0)),  # needs 8 digits
+    ],
+)
+def test_colorbar_round_past_6_digits_keeps_tick_values(data, clim):
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(*data, 20).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im)
+    assert im.get_clim() == pytest.approx(clim, rel=1e-15, abs=0)
+    fig.draw_without_rendering()
+    labels = [t.get_text() for t in cb.ax.get_yticklabels()]
+    assert len(set(labels)) == len(labels)
     assert fwl_mpl.finish(fig) == []
 
 
-def test_digit_limits_cover_data_a_rounding_error_past_2_digits():
-    lo, hi = layout._digit_limits(3.2999999999995, 7.6000000000004)
-    assert lo <= 3.2999999999995 and hi >= 7.6000000000004
+@pytest.mark.parametrize(("lo", "hi"), [(1e-300, 3.3e-300), (5e-324, 3e-323), (5e-324, 3.3)])
+def test_colorbar_round_of_a_range_near_the_smallest_float(lo, hi):
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(lo, hi, 20).reshape(4, 5))
+    fwl_mpl.colorbar(im)
+    assert im.get_clim()[0] <= lo and im.get_clim()[1] >= hi
+    assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
 
 
-def test_digit_limits_keep_the_range_when_16_digits_widen_it_too_much():
-    lo, hi = 1.1408329523228714e173, 1.1408329523228804e173
-    assert layout._digit_limits(lo, hi) == (lo, hi)
+def test_colorbar_round_of_float32_data_rounds_to_the_decimal_value():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(0.7, 3.3, 20, dtype=np.float32).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im)  # float32 0.7 is 0.699999988, which would round down to 0.69
+    assert im.get_clim() == (float(np.float32(0.7)), 3.3)
+    fig.draw_without_rendering()
+    labels = [t.get_text() for t in cb.ax.get_yticklabels()]
+    assert (labels[0], labels[-1]) == ("0.7", "3.3")
+
+
+def test_digit_limits_keep_data_a_rounding_error_past_a_rounded_end():
+    assert layout._digit_limits(3.2999999999995, 7.6000000000004) == (
+        3.2999999999995,
+        7.6000000000004,
+    )
+    assert layout._digit_limits(0, 0.1 * 33) == (0, 0.1 * 33)
+
+
+def test_digit_limits_give_none_when_6_digits_widen_the_range_too_much():
+    assert layout._digit_limits(1000.0123, 1000.0456) is None
+    assert layout._digit_limits(1000.0123, 1000.0956) == (1000.01, 1000.1)
 
 
 def test_colorbar_round_past_a_tenth_keeps_a_format_given():
     fig, ax = plt.subplots()
     im = ax.imshow(np.linspace(0, 3.3, 20).reshape(4, 5))
     cb = fwl_mpl.colorbar(im, format="%.2f")
+    assert im.get_clim() == (0, 3.3)
     fig.draw_without_rendering()
-    assert cb.ax.get_yticklabels()[-1].get_text() == "3.30"
+    labels = [t.get_text() for t in cb.ax.get_yticklabels()]
+    assert (labels[0], labels[-1]) == ("0.00", "3.30")
 
 
 @pytest.mark.parametrize(
@@ -329,13 +372,20 @@ def test_colorbar_round_past_a_tenth_keeps_a_format_given():
     [
         (3.3, True, 3.3),
         (3.3, False, 3.3),
-        (1.1e-06, True, 1.1e-06),  # 1.1e-06 / 1e-07 is 11.000000000000002
+        (3.29872, False, 3.2),
+        (-3.29872, False, -3.3),
+        (-0.000918805, True, -0.00091),
         (9.96, True, 10.0),
+        (np.float64(0.000918805), False, 0.00091),
         (0.0, True, 0.0),
     ],
 )
-def test_round_digits_is_exact_on_decimal_values(value, up, expected):
+def test_round_digits_rounds_outward_to_2_digits(value, up, expected):
     assert layout._round_digits(value, 2, up=up) == expected
+
+
+def test_round_digits_keeps_zero_positive():
+    assert math.copysign(1, layout._round_digits(0.0, 2, up=True)) == 1  # not -0.0
 
 
 def test_colorbar_round_handles_a_log_norm():

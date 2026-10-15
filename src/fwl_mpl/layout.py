@@ -14,6 +14,7 @@ whose ends carry no number. Moving a legend or a label is left to the author.
 """
 
 import math
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
 import matplotlib as mpl
 import numpy as np
@@ -53,11 +54,18 @@ _CROWD = 0.75
 # An image or mesh edge this close to a tick, as a fraction of the span, is
 # snapped to the tick; a mesh drawn from cell centres overhangs by half a cell.
 _SNAP = 0.02
-# Rounding may widen an axis by at most this fraction of the data span; past it
-# the limits stay at the data and the exact ends are labelled instead.
+# Rounding may widen an axis or a colour range by at most this fraction of the
+# data span; past it an axis keeps the data limits and a colour bar rounds digits.
 _MAX_GROW = 0.1
-# Matplotlib widens a colour range narrower than this fraction of its largest end.
+# Colour bar ends are rounded to at most this many digits, the precision of _end_label.
+_MAX_DIGITS = 6
+# A value this close to a rounded value, in units of its last digit, counts as on
+# it; a float32 0.7 is 0.699999988.
+_DIGIT_TOL = Decimal("1e-5")
+# Matplotlib widens a colour range narrower than this fraction of its largest end,
+# and replaces one whose ends are both smaller than _SMALLEST.
 _TINY = 1e-15
+_SMALLEST = 1e6 / _TINY * np.finfo(float).tiny
 
 
 def _nice_ticks(vmin, vmax, nbins=5):
@@ -82,24 +90,32 @@ def _round_digits(value, digits, up):
     """Round ``value`` up or down to ``digits`` significant digits."""
     if value == 0:
         return value
-    exp = math.floor(math.log10(abs(value))) - digits + 1
-    q = value / 10.0**exp
-    k = math.ceil(q - 1e-9) if up else math.floor(q + 1e-9)  # 3.3 / 0.1 is 32.999...
-    return float(f"{k}e{exp}")
+    d = Decimal(repr(float(value)))  # the shortest decimal: 3.3, not 3.29999...
+    exp = d.adjusted() - digits + 1
+    q = d.scaleb(-exp)
+    tol = _DIGIT_TOL if up else -_DIGIT_TOL
+    k = (q - tol).to_integral_value(ROUND_CEILING if up else ROUND_FLOOR)
+    return float(k.scaleb(exp))
+
+
+def _singular(vmin, vmax):
+    """Return whether a colour bar would widen [vmin, vmax], as matplotlib's nonsingular does."""
+    big = max(abs(vmin), abs(vmax))
+    return big < _SMALLEST or vmax - vmin <= _TINY * big
 
 
 def _digit_limits(vmin, vmax):
-    """Expand a range outward to 2 significant digits per end; return (lo, hi).
+    """Expand a range outward to 2 significant digits per end; return (lo, hi) or None.
 
-    More digits are used when 2 would widen the span by more than _MAX_GROW, and
-    the range itself when 16 digits still would.
+    More digits are used when 2 would widen the span by more than _MAX_GROW; None
+    when _MAX_DIGITS still would.
     """
-    for digits in range(2, 17):
+    for digits in range(2, _MAX_DIGITS + 1):
         lo = min(_round_digits(vmin, digits, up=False), vmin)
         hi = max(_round_digits(vmax, digits, up=True), vmax)
         if hi - lo <= (1 + _MAX_GROW) * (vmax - vmin):
             return lo, hi
-    return vmin, vmax
+    return None
 
 
 def _end_ticks(vmin, vmax, nbins=5, log=False):
@@ -157,8 +173,9 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         ``"round"`` widens the colour range outward to tick values, so both ends
         are round numbers. On a linear norm this happens only when it widens the
         range by at most a tenth; otherwise each end is rounded outward to 2
-        significant digits (more when 2 would widen the range by more than a
-        tenth) and labelled. A logarithmic norm goes to whole decades, a contour
+        significant digits and labelled, with up to 6 digits when 2 would widen
+        the range by more than a tenth, and tick values again when 6 still would.
+        A logarithmic norm goes to whole decades, a contour
         set keeps its levels, and other norms keep their range, with the end
         values as ticks. ``"label"`` keeps the range and adds the exact end
         values as ticks; use it when the range itself matters, such as a
@@ -202,10 +219,12 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         and not isinstance(mappable, ContourSet)
     ):
         lo, hi, ticks = _round_limits(vmin, vmax, log=log)
+        digit = None
         if not log and hi - lo > (1 + _MAX_GROW) * (vmax - vmin):
-            lo2, hi2 = _digit_limits(vmin, vmax)
-            if hi2 - lo2 > _TINY * max(abs(lo2), abs(hi2)):
-                lo, hi, ticks, exact = lo2, hi2, _end_ticks(lo2, hi2), True
+            digit = _digit_limits(vmin, vmax)
+        if digit is not None and not _singular(*digit):
+            lo, hi = digit
+            ticks, exact = _end_ticks(lo, hi), True
         vmin, vmax = lo, hi
         mappable.set_clim(vmin, vmax)
     else:
