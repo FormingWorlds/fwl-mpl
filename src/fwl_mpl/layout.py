@@ -30,6 +30,7 @@ from matplotlib.ticker import (
     FixedLocator,
     FuncFormatter,
     LogFormatter,
+    LogFormatterSciNotation,
     LogLocator,
     MaxNLocator,
     MultipleLocator,
@@ -66,7 +67,7 @@ def _round_limits(vmin, vmax, log=False):
     """Expand a range outward to tick values; return (lo, hi, ticks)."""
     if log:
         lo = 10.0 ** math.floor(math.log10(vmin))
-        hi = 10.0 ** math.ceil(math.log10(vmax))
+        hi = max(10.0 ** math.ceil(math.log10(vmax)), 10 * lo)
         return lo, hi, _end_ticks(lo, hi, log=True)
     ticks = _nice_ticks(vmin, vmax)
     tol = 1e-9 * (vmax - vmin)  # a tick at 0.30000000000000004 counts as 0.3
@@ -90,15 +91,18 @@ def _end_ticks(vmin, vmax, nbins=5, log=False):
     step = ticks[1] - ticks[0] if len(ticks) > 1 else (hi - lo)
     keep = inner[(inner - lo > _CROWD * step) & (hi - inner > _CROWD * step)]
     if not log:  # an end that is zero but for rounding error is labelled 0
-        vmin, vmax = (0.0 if abs(v) <= 1e-9 * (vmax - vmin) else v for v in (vmin, vmax))
+        noise = 64 * np.finfo(float).eps * max(abs(vmin), abs(vmax))
+        vmin = 0.0 if abs(vmin) <= noise else vmin
+        vmax = 0.0 if abs(vmax) <= noise else vmax
     return np.concatenate([[vmin], 10.0**keep if log else keep, [vmax]])
 
 
-def _minor_locator(vmin, vmax, nbins, name):
+def _minor_locator(vmin, vmax, nbins, name, ndivs=None):
     """Minor ticks on the step of the inner major ticks, divided as AutoMinorLocator does."""
     ticks = _nice_ticks(vmin, vmax, nbins)
     step = ticks[1] - ticks[0]
-    ndivs = mpl.rcParams.get(f"{name}tick.minor.ndivs", "auto")
+    if ndivs is None:
+        ndivs = mpl.rcParams.get(f"{name}tick.minor.ndivs", "auto")
     if ndivs == "auto":
         mantissa = step / 10 ** math.floor(math.log10(step))
         ndivs = 5 if np.isclose(mantissa, [1, 2.5, 5, 10]).any() else 4
@@ -160,6 +164,8 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         mappable.set_clim(0, 1)  # as Figure.colorbar does for a mappable without data
     vmin, vmax = norm.vmin, norm.vmax
     log = isinstance(norm, LogNorm)
+    if log and not (np.isfinite(vmin) and vmin > 0):
+        raise ValueError(f"a log norm needs a positive vmin, got {vmin}")
     if (
         ends == "round"
         and type(norm) in (Normalize, LogNorm)
@@ -207,10 +213,11 @@ def label_ends(ax, axis="both"):
             log = axis_.get_scale() == "log"
             getattr(ax, f"set_{name}ticks")(_end_ticks(lo, hi, nbins, log=log))
             axis_.set_major_formatter(FuncFormatter(_end_label))
-            if log:  # the labelled ends carry the numbers; minor labels would mix formats
-                axis_.set_minor_formatter(NullFormatter())
-            elif isinstance(axis_.get_minor_locator(), AutoMinorLocator):
-                axis_.set_minor_locator(_minor_locator(lo, hi, nbins, name))
+            minor = axis_.get_minor_locator()
+            if log and type(axis_.get_minor_formatter()) in (LogFormatter, LogFormatterSciNotation):
+                axis_.set_minor_formatter(NullFormatter())  # minor labels would mix formats
+            elif not log and isinstance(minor, AutoMinorLocator):
+                axis_.set_minor_locator(_minor_locator(lo, hi, nbins, name, minor.ndivs))
 
 
 def _even_grid(lo, hi, max_ticks):
@@ -263,7 +270,7 @@ def _unclip_markers(ax):
             continue
         pts = pts[np.isfinite(pts).all(axis=1)]
         inside = (pts >= [box.x0, box.y0]) & (pts <= [box.x1, box.y1])
-        if artist.get_clip_on() and len(pts) and inside.all():
+        if artist.get_clip_on() and artist.get_clip_path() is None and len(pts) and inside.all():
             artist.set_clip_on(False)
 
 
@@ -348,12 +355,11 @@ def _snap_to_ticks(ax, name):
     if axis.get_scale() == "log":  # distances in decades
         lims, ticks = np.log10(lims), np.log10(ticks[ticks > 0])
     span = abs(lims[1] - lims[0])
-    new = []
-    for v in lims:
+    new = list(getattr(ax, f"get_{name}lim")())
+    for i, v in enumerate(lims):
         near = ticks[np.argmin(np.abs(ticks - v))]
-        new.append(near if abs(near - v) <= _SNAP * span else v)
-    if axis.get_scale() == "log":
-        new = [10.0**v for v in new]
+        if abs(near - v) <= _SNAP * span:
+            new[i] = 10.0**near if axis.get_scale() == "log" else near
     getattr(ax, f"set_{name}lim")(*new)
 
 
@@ -427,7 +433,8 @@ def finish(fig):
     for ax in _all_axes(fig):
         cb = getattr(ax, "_colorbar", None)
         if cb is not None:
-            if not getattr(cb, "_fwl_ends", False):
+            long = cb.ax.yaxis if cb.orientation == "vertical" else cb.ax.xaxis
+            if not getattr(cb, "_fwl_ends", False) and _default_ticks(long):
                 bars.append(cb)
             continue
         if isinstance(ax, PolarAxes) or ax.name == "3d" or not ax.axison or _secondary(ax):
@@ -593,19 +600,25 @@ def _extent(item, renderer):
     return item.get_window_extent(renderer)
 
 
-def _under_inset(item, box, artist, parent):
-    """True when text on an opaque inset meets an artist of an axes that the inset covers."""
+def _covered(item, box, parent):
+    """Return the inset under a text and the axes it covers, or (None, ()).
+
+    Only an inset whose background is drawn and opaque hides the data of the
+    axes below it; text that runs past the inset lies on the data around it.
+    """
     inset = getattr(item, "axes", None)
-    if inset is None or not inset.patch.get_visible():
-        return False
+    if inset not in parent or not (inset.axison and inset.get_frame_on()):
+        return None, ()
+    patch = inset.patch
+    if not patch.get_visible() or patch.get_facecolor()[3] < 1:
+        return None, ()
     if not (inset.bbox.contains(*box.p0) and inset.bbox.contains(*box.p1)):
-        return False  # text that runs past the inset lies on the data around it
-    owner, above = getattr(artist, "axes", None), parent.get(inset)
+        return None, ()
+    below, above = [], parent[inset]
     while above is not None:
-        if above is owner:
-            return True
+        below.append(above)
         above = parent.get(above)
-    return False
+    return inset, below
 
 
 def _collisions(fig, renderer):
@@ -619,8 +632,10 @@ def _collisions(fig, renderer):
     obstacles = _obstacles(fig)
     parent = {child: ax for ax in _all_axes(fig) for child in ax.child_axes}
     for item, box in zip(texts, boxes, strict=True):
+        inset, below = _covered(item, box, parent)
         for artist, path, points, radius in obstacles:
-            if _under_inset(item, box, artist, parent):
+            owner = getattr(artist, "axes", None)
+            if owner in below and artist.get_zorder() < inset.get_zorder():
                 continue
             if _hits(_clip(box, artist), path, points, radius):
                 problems.append(f"{_describe(item)} overlaps {_describe(artist)}")

@@ -667,6 +667,7 @@ def test_text_and_legend_of_a_subfigure_are_checked():
 def test_round_limits_of_a_range_whose_ends_are_inexact_ticks(lo, hi):
     # MaxNLocator gives 0.30000000000000004 for 0.3, just above the data.
     vmin, vmax, ticks = layout._round_limits(lo, hi)
+    assert vmin <= lo and vmax >= hi  # the range still covers the data
     assert (vmin, vmax) == pytest.approx((lo, hi))  # both ends are tick values already
     assert ticks[[0, -1]] == pytest.approx([vmin, vmax])
 
@@ -684,7 +685,10 @@ def test_ends_of_a_log_axis_are_compared_in_decades():
     ax.plot([1, 2], [3e-5, 5e3])
     ax.set(xlim=(1, 2), yscale="log", ylim=(2e-5, 1e4))
     # In linear units the tick at 1e-4 is within 1e-6 of the span from 2e-5.
-    assert "axes 0: y axis lower end 2e-05 has no tick label" in fwl_mpl.check_figure(fig)
+    lower = [
+        p for p in fwl_mpl.check_figure(fig) if "lower" in p
+    ]  # matplotlib 3.7 ticks other decades
+    assert lower == ["axes 0: y axis lower end 2e-05 has no tick label"]
     assert fwl_mpl.finish(fig) == []
 
 
@@ -706,8 +710,14 @@ def test_a_log_mesh_snaps_in_decades():
     ax.pcolormesh(x, x, np.outer(x, x))
     ax.set(xscale="log", yscale="log")
     lo = ax.get_xlim()[0]
-    fwl_mpl.finish(fig)
-    assert ax.get_xlim()[0] == pytest.approx(lo)  # 2.7 is 0.43 decades from 1, not within 2 %
+    assert fwl_mpl.finish(fig) == []
+    assert ax.get_xlim()[0] == lo  # 2.7 is 0.43 decades from 1, not within 2 %
+    fig, ax = plt.subplots()
+    x = np.geomspace(1.02, 980, 30)  # edges within 0.02 decades of 1 and 1000
+    ax.pcolormesh(x, x, np.outer(x, x))
+    ax.set(xscale="log", yscale="log")
+    assert fwl_mpl.finish(fig) == []
+    assert ax.get_xlim() == pytest.approx((1, 1000))
 
 
 @pytest.mark.parametrize(("lo", "hi"), [(3e-5, 7e5), (3e-6, 7e6), (2, 7e10)])
@@ -716,7 +726,7 @@ def test_a_wide_log_colorbar_keeps_both_end_ticks(lo, hi):
     im = ax.imshow(np.geomspace(lo, hi, 20).reshape(4, 5), norm=matplotlib.colors.LogNorm())
     cb = fwl_mpl.colorbar(im)
     assert cb.get_ticks()[[0, -1]] == pytest.approx(im.get_clim())
-    assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
+    assert fwl_mpl.finish(fig) == []
 
 
 def test_text_on_an_opaque_inset_is_not_tested_against_the_data_it_covers():
@@ -803,3 +813,96 @@ def test_markers_are_drawn_whole_on_an_axes_without_default_ticks():
     ax.set(yticks=[0, 5, 10], ylim=(0, 10))
     assert fwl_mpl.finish(fig) == []
     assert not dots.get_clip_on()
+
+
+@pytest.mark.parametrize(
+    "see_through",
+    [
+        lambda inset: inset.set_facecolor("none"),
+        lambda inset: inset.patch.set_alpha(0.3),
+        lambda inset: inset.set_frame_on(False),
+        lambda inset: inset.axis("off"),
+        lambda inset: inset.set_zorder(1),  # below the parent line (zorder 2)
+    ],
+)
+def test_text_on_an_inset_that_shows_the_data_below_is_checked(see_through):
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.plot([0, 10], [5, 5])
+    ax.set(xlim=(0, 10), ylim=(0, 10))
+    inset = ax.inset_axes([0.15, 0.4, 0.55, 0.55])
+    inset.set(xlim=(0, 1), ylim=(0, 1))
+    see_through(inset)
+    inset.text(0.2, 1 / 5.5, "hidden", transform=inset.transAxes, va="center")
+    assert any("'hidden' overlaps Line2D" in p for p in fwl_mpl.check_figure(fig))
+
+
+def test_finish_keeps_colorbar_ticks_and_format_set_by_hand():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(0, 3.3, 20).reshape(4, 5))
+    cb = fig.colorbar(im, ticks=[0, 1, 2, 3], format="%.1f")
+    problems = fwl_mpl.finish(fig)
+    assert list(cb.get_ticks()) == [0, 1, 2, 3]
+    assert type(cb.formatter).__name__ == "FormatStrFormatter"
+    assert problems == ["axes 1: y axis upper end 3.3 has no tick label"]
+
+
+def test_only_rounding_noise_is_labelled_0():
+    assert list(layout._end_ticks(3.0, 4e9)[[0, -1]]) == [3.0, 4e9]
+    assert list(layout._end_ticks(-1.0, 0.1 + 0.2 - 0.3)[[0, -1]]) == [-1.0, 0.0]
+
+
+def test_label_ends_keeps_the_minor_divisions_set_by_hand():
+    from matplotlib.ticker import AutoMinorLocator
+
+    fig, ax = plt.subplots()
+    ax.plot([0, 10], [0, 1])
+    ax.set_xlim(0.3, 8.2)
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    assert fwl_mpl.finish(fig) == []
+    minor = [v for v in ax.xaxis.get_minorticklocs() if 0.3 <= v <= 8.2]
+    assert minor == pytest.approx([1, 3, 5, 7, 8])  # step 2 in halves; 2, 4, 6 are major
+
+
+def test_label_ends_keeps_a_minor_formatter_set_by_hand_on_a_log_axis():
+    from matplotlib.ticker import FormatStrFormatter
+
+    fig, ax = plt.subplots()
+    ax.plot([1, 2], [2, 8])
+    ax.set(yscale="log", ylim=(2, 8))
+    formatter = FormatStrFormatter("%.0f")
+    ax.yaxis.set_minor_formatter(formatter)
+    fwl_mpl.label_ends(ax, "y")
+    assert ax.yaxis.get_minor_formatter() is formatter
+
+
+def test_colorbar_log_norm_needs_a_positive_vmin_and_widens_a_constant_range():
+    fig, ax = plt.subplots()
+    norm = matplotlib.colors.LogNorm(vmin=0, vmax=10)
+    im = ax.imshow(np.linspace(1, 10, 20).reshape(4, 5), norm=norm)
+    with pytest.raises(ValueError, match="positive vmin"):
+        fwl_mpl.colorbar(im)
+    flat = ax.imshow(np.full((3, 3), 100.0), norm=matplotlib.colors.LogNorm())
+    cb = fwl_mpl.colorbar(flat)
+    assert flat.get_clim() == (100, 1000)
+    assert cb.get_ticks()[[0, -1]] == pytest.approx([100, 1000])
+
+
+def test_finish_keeps_a_clip_path_set_by_hand():
+    from matplotlib.patches import Circle
+
+    fig, ax = plt.subplots()
+    (dots,) = ax.plot(np.arange(11), np.arange(11), "o")
+    dots.set_clip_path(Circle((5, 5), 3, transform=ax.transData))
+    fwl_mpl.finish(fig)
+    assert dots.get_clip_on()
+
+
+@pytest.mark.skipif(
+    tuple(map(int, matplotlib.__version__.split(".")[:2])) < (3, 8),
+    reason="pcolor returns a PolyQuadMesh from matplotlib 3.8",
+)
+def test_finish_keeps_a_pcolor_mesh_at_its_data():
+    fig, ax = plt.subplots()
+    ax.pcolor(np.arange(30), np.arange(30), np.ones((29, 29)))
+    assert fwl_mpl.finish(fig) == []
+    assert ax.get_xlim() == (0, 29)
