@@ -56,6 +56,8 @@ _SNAP = 0.02
 # Rounding may widen an axis by at most this fraction of the data span; past it
 # the limits stay at the data and the exact ends are labelled instead.
 _MAX_GROW = 0.1
+# Matplotlib widens a colour range narrower than this fraction of its largest end.
+_TINY = 1e-15
 
 
 def _nice_ticks(vmin, vmax, nbins=5):
@@ -74,6 +76,30 @@ def _round_limits(vmin, vmax, log=False):
     lo = min(ticks[ticks <= vmin + tol].max(), vmin)
     hi = max(ticks[ticks >= vmax - tol].min(), vmax)
     return lo, hi, ticks[(ticks >= lo - tol) & (ticks <= hi + tol)]
+
+
+def _round_digits(value, digits, up):
+    """Round ``value`` up or down to ``digits`` significant digits."""
+    if value == 0:
+        return value
+    exp = math.floor(math.log10(abs(value))) - digits + 1
+    q = value / 10.0**exp
+    k = math.ceil(q - 1e-9) if up else math.floor(q + 1e-9)  # 3.3 / 0.1 is 32.999...
+    return float(f"{k}e{exp}")
+
+
+def _digit_limits(vmin, vmax):
+    """Expand a range outward to 2 significant digits per end; return (lo, hi).
+
+    More digits are used when 2 would widen the span by more than _MAX_GROW, and
+    the range itself when 16 digits still would.
+    """
+    for digits in range(2, 17):
+        lo = min(_round_digits(vmin, digits, up=False), vmin)
+        hi = max(_round_digits(vmax, digits, up=True), vmax)
+        if hi - lo <= (1 + _MAX_GROW) * (vmax - vmin):
+            return lo, hi
+    return vmin, vmax
 
 
 def _end_ticks(vmin, vmax, nbins=5, log=False):
@@ -129,9 +155,12 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         of ``mappable``.
     ends : {"round", "label"}
         ``"round"`` widens the colour range outward to tick values, so both ends
-        are round numbers; this applies to linear and logarithmic norms, while a
-        contour set keeps its levels and other norms keep their range, with the
-        end values as ticks. ``"label"`` keeps the range and adds the exact end
+        are round numbers. On a linear norm this happens only when it widens the
+        range by at most a tenth; otherwise each end is rounded outward to 2
+        significant digits (more when 2 would widen the range by more than a
+        tenth) and labelled. A logarithmic norm goes to whole decades, a contour
+        set keeps its levels, and other norms keep their range, with the end
+        values as ticks. ``"label"`` keeps the range and adds the exact end
         values as ticks; use it when the range itself matters, such as a
         symmetric diverging range.
     **kwargs
@@ -166,12 +195,18 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
     log = isinstance(norm, LogNorm)
     if log and not (np.isfinite(vmin) and vmin > 0):
         raise ValueError(f"a log norm needs a positive vmin, got {vmin}")
+    exact = ends == "label"
     if (
         ends == "round"
         and type(norm) in (Normalize, LogNorm)
         and not isinstance(mappable, ContourSet)
     ):
-        vmin, vmax, ticks = _round_limits(vmin, vmax, log=log)
+        lo, hi, ticks = _round_limits(vmin, vmax, log=log)
+        if not log and hi - lo > (1 + _MAX_GROW) * (vmax - vmin):
+            lo2, hi2 = _digit_limits(vmin, vmax)
+            if hi2 - lo2 > _TINY * max(abs(lo2), abs(hi2)):
+                lo, hi, ticks, exact = lo2, hi2, _end_ticks(lo2, hi2), True
+        vmin, vmax = lo, hi
         mappable.set_clim(vmin, vmax)
     else:
         ticks = _end_ticks(vmin, vmax, log=log)
@@ -179,7 +214,7 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
     cb.outline.set_visible(False)
     if "ticks" not in kwargs:
         cb.set_ticks(ticks)
-    if ends == "label" and "format" not in kwargs:
+    if exact and "format" not in kwargs:
         cb.formatter = FuncFormatter(_end_label)
     cb._fwl_ends = True
     return cb
