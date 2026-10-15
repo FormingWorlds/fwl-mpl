@@ -14,7 +14,7 @@ whose ends carry no number. Moving a legend or a label is left to the author.
 """
 
 import math
-from decimal import ROUND_CEILING, ROUND_FLOOR, Context, Decimal, localcontext
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Context, Decimal, localcontext
 
 import matplotlib as mpl
 import numpy as np
@@ -62,7 +62,16 @@ _LABEL_DIGITS = 6
 # A value within this fraction of a rounded value counts as on it; float32 data
 # are off by up to 6e-8 (a float32 0.7 is 0.699999988).
 _DIGIT_TOL = Decimal("1e-7")
-_DECIMAL = Context(prec=40)
+_DECIMAL = Context(  # every field set, so no global decimal setting applies
+    prec=40,
+    rounding=ROUND_HALF_EVEN,
+    Emin=-999999,
+    Emax=999999,
+    capitals=1,
+    clamp=0,
+    flags=[],
+    traps=[],
+)
 # Matplotlib widens a colour range narrower than this fraction of its largest end,
 # and replaces one whose ends are both smaller than _SMALLEST.
 _TINY = 1e-15
@@ -112,17 +121,23 @@ def _singular(vmin, vmax):
     return big < _SMALLEST or vmax - vmin <= _TINY * big
 
 
+def _label_is_exact(value):
+    """Return whether the end label shows ``value`` without rounding."""
+    return math.isclose(float(format(value, f".{_LABEL_DIGITS}g")), value, rel_tol=1e-12)
+
+
 def _digit_limits(vmin, vmax):
     """Expand a range outward to significant digits per end; return (lo, hi) or None.
 
-    The digit count is the smallest from 2 to _LABEL_DIGITS that widens the span
-    by at most _MAX_GROW; None when none does. An end within _DIGIT_TOL of a
-    rounded value keeps the data value.
+    The digit count is the smallest from 2 to _LABEL_DIGITS that gives 2 different
+    rounded ends and widens the span by at most _MAX_GROW; None when none does. An
+    end within _DIGIT_TOL of a rounded value keeps the data value.
     """
     for digits in range(2, _LABEL_DIGITS + 1):
-        lo = min(_round_digits(vmin, digits, up=False), vmin)
-        hi = max(_round_digits(vmax, digits, up=True), vmax)
-        if hi - lo <= (1 + _MAX_GROW) * (vmax - vmin):
+        down = _round_digits(vmin, digits, up=False)
+        up = _round_digits(vmax, digits, up=True)
+        lo, hi = min(down, vmin), max(up, vmax)
+        if down < up and hi - lo <= (1 + _MAX_GROW) * (vmax - vmin):
             return lo, hi
     return None
 
@@ -184,8 +199,9 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         range by at most a tenth; otherwise each end is rounded outward to 2
         significant digits and labelled, with up to 6 digits when 2 would widen
         the range by more than a tenth, and tick values again when 6 still would.
-        A logarithmic norm goes to whole decades, a contour
-        set keeps its levels, and other norms keep their range, with the end
+        An end within 1e-7 of a rounded value keeps the data value and shows the
+        rounded one. A logarithmic norm goes to whole decades, a contour set
+        keeps its levels, and other norms keep their range, with the end
         values as ticks. ``"label"`` keeps the range and adds the exact end
         values as ticks; use it when the range itself matters, such as a
         symmetric diverging range.
@@ -234,6 +250,8 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         if digit is not None and not _singular(*digit):
             lo, hi = digit
             ticks, exact = _end_ticks(lo, hi), True
+            inner = [t for t in ticks[1:-1] if _label_is_exact(t)]  # 1000.005 prints as 1000.01
+            ticks = np.array([lo, *inner, hi])
         vmin, vmax = lo, hi
         mappable.set_clim(vmin, vmax)
     else:
