@@ -33,6 +33,7 @@ from matplotlib.ticker import (
     LogLocator,
     MaxNLocator,
     MultipleLocator,
+    NullFormatter,
     ScalarFormatter,
 )
 from matplotlib.transforms import Bbox
@@ -64,10 +65,9 @@ def _nice_ticks(vmin, vmax, nbins=5):
 def _round_limits(vmin, vmax, log=False):
     """Expand a range outward to tick values; return (lo, hi, ticks)."""
     if log:
-        lo = 10 ** math.floor(math.log10(vmin))
-        hi = 10 ** math.ceil(math.log10(vmax))
-        ticks = LogLocator().tick_values(lo, hi)
-        return lo, hi, ticks[(ticks >= lo) & (ticks <= hi)]
+        lo = 10.0 ** math.floor(math.log10(vmin))
+        hi = 10.0 ** math.ceil(math.log10(vmax))
+        return lo, hi, _end_ticks(lo, hi, log=True)
     ticks = _nice_ticks(vmin, vmax)
     tol = 1e-9 * (vmax - vmin)  # a tick at 0.30000000000000004 counts as 0.3
     lo = min(ticks[ticks <= vmin + tol].max(), vmin)
@@ -89,15 +89,20 @@ def _end_ticks(vmin, vmax, nbins=5, log=False):
     inner = ticks[(ticks > lo) & (ticks < hi)]
     step = ticks[1] - ticks[0] if len(ticks) > 1 else (hi - lo)
     keep = inner[(inner - lo > _CROWD * step) & (hi - inner > _CROWD * step)]
+    if not log:  # an end that is zero but for rounding error is labelled 0
+        vmin, vmax = (0.0 if abs(v) <= 1e-9 * (vmax - vmin) else v for v in (vmin, vmax))
     return np.concatenate([[vmin], 10.0**keep if log else keep, [vmax]])
 
 
-def _minor_locator(vmin, vmax, nbins):
+def _minor_locator(vmin, vmax, nbins, name):
     """Minor ticks on the step of the inner major ticks, divided as AutoMinorLocator does."""
     ticks = _nice_ticks(vmin, vmax, nbins)
     step = ticks[1] - ticks[0]
-    mantissa = step / 10 ** math.floor(math.log10(step))
-    return MultipleLocator(step / (5 if np.isclose(mantissa, [1, 5]).any() else 4))
+    ndivs = mpl.rcParams.get(f"{name}tick.minor.ndivs", "auto")
+    if ndivs == "auto":
+        mantissa = step / 10 ** math.floor(math.log10(step))
+        ndivs = 5 if np.isclose(mantissa, [1, 2.5, 5, 10]).any() else 4
+    return MultipleLocator(step / ndivs)
 
 
 def _end_label(value, pos=None):
@@ -136,19 +141,22 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
     Raises
     ------
     ValueError
-        If ``ends`` is not one of the two modes, or if neither ``ax`` nor the
-        mappable names an axes.
+        If ``ends`` is not one of the two modes, if neither ``ax``, ``cax`` nor
+        the mappable names an axes, or if a log norm has neither data nor limits.
     """
     if ends not in ("round", "label"):
         raise ValueError(f"ends must be 'round' or 'label', got {ends!r}")
     if ax is None:
         ax = getattr(mappable, "axes", None)
-    if ax is None:
-        raise ValueError("the mappable is on no axes; pass ax")
+    host = ax if kwargs.get("cax") is None else kwargs["cax"]
+    if host is None:
+        raise ValueError("the mappable is on no axes; pass ax or cax")
     if mappable.get_array() is not None:
         mappable.autoscale_None()
     norm = mappable.norm
     if not norm.scaled():
+        if isinstance(norm, LogNorm):
+            raise ValueError("a log norm without data needs vmin and vmax")
         mappable.set_clim(0, 1)  # as Figure.colorbar does for a mappable without data
     vmin, vmax = norm.vmin, norm.vmax
     log = isinstance(norm, LogNorm)
@@ -161,7 +169,7 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         mappable.set_clim(vmin, vmax)
     else:
         ticks = _end_ticks(vmin, vmax, log=log)
-    cb = np.ravel(ax)[0].figure.colorbar(mappable, ax=ax, **kwargs)
+    cb = np.ravel(host)[0].figure.colorbar(mappable, ax=ax, **kwargs)
     cb.outline.set_visible(False)
     if "ticks" not in kwargs:
         cb.set_ticks(ticks)
@@ -175,8 +183,9 @@ def label_ends(ax, axis="both"):
     """Put labelled ticks on both limits of an axis whose limits were set by hand.
 
     Call it after the last change to the limits: the ticks it sets are fixed.
-    On a logarithmic axis the inner ticks are powers of ten. Default minor ticks
-    of a linear axis follow the step of the inner major ticks.
+    On a logarithmic axis the inner ticks are powers of ten and minor ticks carry
+    no label. Default minor ticks of a linear axis follow the step of the inner
+    major ticks.
 
     Parameters
     ----------
@@ -198,8 +207,10 @@ def label_ends(ax, axis="both"):
             log = axis_.get_scale() == "log"
             getattr(ax, f"set_{name}ticks")(_end_ticks(lo, hi, nbins, log=log))
             axis_.set_major_formatter(FuncFormatter(_end_label))
-            if not log and isinstance(axis_.get_minor_locator(), AutoMinorLocator):
-                axis_.set_minor_locator(_minor_locator(lo, hi, nbins))
+            if log:  # the labelled ends carry the numbers; minor labels would mix formats
+                axis_.set_minor_formatter(NullFormatter())
+            elif isinstance(axis_.get_minor_locator(), AutoMinorLocator):
+                axis_.set_minor_locator(_minor_locator(lo, hi, nbins, name))
 
 
 def _even_grid(lo, hi, max_ticks):
@@ -331,13 +342,18 @@ def _ends_on_ticks(ax, name):
 
 def _snap_to_ticks(ax, name):
     """Move each limit onto a tick when it lies within _SNAP of the span from one."""
-    lo, hi = getattr(ax, f"get_{name}lim")()
-    ticks = np.asarray(getattr(ax, f"{name}axis").get_major_locator()())
-    span = abs(hi - lo)
+    axis = getattr(ax, f"{name}axis")
+    lims = np.asarray(getattr(ax, f"get_{name}lim")(), dtype=float)
+    ticks = np.asarray(axis.get_major_locator()(), dtype=float)
+    if axis.get_scale() == "log":  # distances in decades
+        lims, ticks = np.log10(lims), np.log10(ticks[ticks > 0])
+    span = abs(lims[1] - lims[0])
     new = []
-    for v in (lo, hi):
+    for v in lims:
         near = ticks[np.argmin(np.abs(ticks - v))]
         new.append(near if abs(near - v) <= _SNAP * span else v)
+    if axis.get_scale() == "log":
+        new = [10.0**v for v in new]
     getattr(ax, f"set_{name}lim")(*new)
 
 
@@ -390,7 +406,9 @@ def finish(fig):
     bars made with ``Figure.colorbar`` whose ends carry no tick get their end
     values as ticks. Markers of a series that lies inside its axes are drawn
     whole, so a point on an axis limit is not cut in half.
-    Inset axes count as axes. Only axes with the tick locator and formatter of
+    Call it once, after the last change to the figure: the axes it changes no
+    longer have the default ticks, so a second call leaves them alone. Inset
+    axes count as axes. Only axes with the tick locator and formatter of
     matplotlib change: an axis with ticks set by hand, or with dates, categories
     or other units, keeps them. Polar, 3D and secondary axes and axes without
     visible axis lines are left alone.
@@ -405,7 +423,7 @@ def finish(fig):
         The problems :func:`check_figure` finds afterwards; empty when the
         figure follows the rules.
     """
-    plain, bars = [], []
+    plain, bars, kept = [], [], []
     for ax in _all_axes(fig):
         cb = getattr(ax, "_colorbar", None)
         if cb is not None:
@@ -414,6 +432,7 @@ def finish(fig):
             continue
         if isinstance(ax, PolarAxes) or ax.name == "3d" or not ax.axison or _secondary(ax):
             continue
+        kept.append(ax)
         image = _has_image(ax)
         for name in ("x", "y"):
             if not _default_ticks(getattr(ax, f"{name}axis")):
@@ -430,7 +449,7 @@ def finish(fig):
     for ax, name in plain:
         if not _ends_on_ticks(ax, name):
             label_ends(ax, name)
-    for ax in {ax for ax, _ in plain}:
+    for ax in kept:
         _unclip_markers(ax)
     for cb in bars:
         axis = cb.ax.yaxis if cb.orientation == "vertical" else cb.ax.xaxis
@@ -574,6 +593,21 @@ def _extent(item, renderer):
     return item.get_window_extent(renderer)
 
 
+def _under_inset(item, box, artist, parent):
+    """True when text on an opaque inset meets an artist of an axes that the inset covers."""
+    inset = getattr(item, "axes", None)
+    if inset is None or not inset.patch.get_visible():
+        return False
+    if not (inset.bbox.contains(*box.p0) and inset.bbox.contains(*box.p1)):
+        return False  # text that runs past the inset lies on the data around it
+    owner, above = getattr(artist, "axes", None), parent.get(inset)
+    while above is not None:
+        if above is owner:
+            return True
+        above = parent.get(above)
+    return False
+
+
 def _collisions(fig, renderer):
     problems = []
     texts = _texts(fig)
@@ -583,8 +617,11 @@ def _collisions(fig, renderer):
             if ba.overlaps(bb):
                 problems.append(f"{_describe(a)} overlaps {_describe(b)}")
     obstacles = _obstacles(fig)
+    parent = {child: ax for ax in _all_axes(fig) for child in ax.child_axes}
     for item, box in zip(texts, boxes, strict=True):
         for artist, path, points, radius in obstacles:
+            if _under_inset(item, box, artist, parent):
+                continue
             if _hits(_clip(box, artist), path, points, radius):
                 problems.append(f"{_describe(item)} overlaps {_describe(artist)}")
     return problems
@@ -633,10 +670,12 @@ def check_figure(fig):
         One line per problem: text, tick labels or a legend that overlap a data
         line, a marker, an error bar, an axis line or other text, and axis or
         colour-bar ends without a tick label. Empty when the figure follows the
-        rules. Rotated text is tested by its upright bounding box, which is larger
+        rules. Rotated text is tested by its axis-aligned bounding box, which is larger
         than the glyphs, so rotated labels need clear space around them. Filled
-        areas and images are not obstacles, and an annotation is tested by its
-        text, not its arrow. Polar, 3D and secondary axes, and axes with dates,
+        areas and images are not obstacles, an annotation is tested by its text,
+        not its arrow, and text on an opaque inset is not tested against the data
+        the inset covers. Axes are numbered in the order of ``fig.axes``, each
+        followed by its inset and secondary axes. Polar, 3D and secondary axes, and axes with dates,
         categories or other units, are not tested for labelled ends.
     """
     fig.draw_without_rendering()

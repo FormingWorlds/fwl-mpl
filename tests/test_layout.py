@@ -532,8 +532,16 @@ def test_label_ends_puts_minor_ticks_on_the_step_of_the_inner_ticks():
     assert minor == pytest.approx(expected)
 
 
-def test_end_labels_keep_six_digits_without_an_exponent():
+def test_end_labels_keep_six_significant_digits():
     assert [layout._end_label(v) for v in (12000, 0.123456)] == ["12000", "0.123456"]
+
+
+def test_an_end_that_is_zero_but_for_rounding_error_is_labelled_0():
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1])
+    ax.set_ylim(0.1 + 0.2 - 0.3, 0.97)  # 5.55e-17
+    assert fwl_mpl.finish(fig) == []
+    assert ax.get_yticklabels()[0].get_text() == "0"
 
 
 def test_finish_draws_markers_on_an_axis_limit_whole():
@@ -635,6 +643,8 @@ def test_finish_leaves_an_axis_with_units_alone():
         problems = fwl_mpl.finish(fig)
         assert ax.xaxis.have_units() and ax.get_xlim() == before
         assert type(ax.xaxis.get_major_locator()).__name__ == "AutoLocator"
+        fwl_mpl.round_limits(ax, "x")
+        assert ax.get_xlim() == before
         assert not [p for p in problems if "x axis" in p]
     finally:
         del munits.registry[Metres]
@@ -657,7 +667,7 @@ def test_text_and_legend_of_a_subfigure_are_checked():
 def test_round_limits_of_a_range_whose_ends_are_inexact_ticks(lo, hi):
     # MaxNLocator gives 0.30000000000000004 for 0.3, just above the data.
     vmin, vmax, ticks = layout._round_limits(lo, hi)
-    assert vmin <= lo and vmax >= hi
+    assert (vmin, vmax) == pytest.approx((lo, hi))  # both ends are tick values already
     assert ticks[[0, -1]] == pytest.approx([vmin, vmax])
 
 
@@ -674,5 +684,122 @@ def test_ends_of_a_log_axis_are_compared_in_decades():
     ax.plot([1, 2], [3e-5, 5e3])
     ax.set(xlim=(1, 2), yscale="log", ylim=(2e-5, 1e4))
     # In linear units the tick at 1e-4 is within 1e-6 of the span from 2e-5.
-    assert fwl_mpl.check_figure(fig) == ["axes 0: y axis lower end 2e-05 has no tick label"]
+    assert "axes 0: y axis lower end 2e-05 has no tick label" in fwl_mpl.check_figure(fig)
     assert fwl_mpl.finish(fig) == []
+
+
+def test_minor_ticks_divide_a_step_of_2_5_into_5():
+    locator = layout._minor_locator(0, 10, 4, "x")  # major step 2.5
+    assert np.diff(locator.tick_values(0, 10)) == pytest.approx(0.5)
+
+
+@pytest.mark.skipif("xtick.minor.ndivs" not in matplotlib.rcParams, reason="rc setting from 3.8")
+def test_minor_ticks_follow_the_ndivs_setting():
+    with matplotlib.rc_context({"xtick.minor.ndivs": 2}):
+        locator = layout._minor_locator(0, 10, 4, "x")
+    assert np.diff(locator.tick_values(0, 5)) == pytest.approx(1.25)
+
+
+def test_a_log_mesh_snaps_in_decades():
+    fig, ax = plt.subplots()
+    x = np.geomspace(3, 700, 30)
+    ax.pcolormesh(x, x, np.outer(x, x))
+    ax.set(xscale="log", yscale="log")
+    lo = ax.get_xlim()[0]
+    fwl_mpl.finish(fig)
+    assert ax.get_xlim()[0] == pytest.approx(lo)  # 2.7 is 0.43 decades from 1, not within 2 %
+
+
+@pytest.mark.parametrize(("lo", "hi"), [(3e-5, 7e5), (3e-6, 7e6), (2, 7e10)])
+def test_a_wide_log_colorbar_keeps_both_end_ticks(lo, hi):
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.geomspace(lo, hi, 20).reshape(4, 5), norm=matplotlib.colors.LogNorm())
+    cb = fwl_mpl.colorbar(im)
+    assert cb.get_ticks()[[0, -1]] == pytest.approx(im.get_clim())
+    assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
+
+
+def test_text_on_an_opaque_inset_is_not_tested_against_the_data_it_covers():
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.plot([0, 10], [5, 5])  # runs behind the inset
+    ax.set(xlim=(0, 10), ylim=(0, 10))
+    inset = ax.inset_axes([0.15, 0.4, 0.55, 0.55])  # covers y 4 to 9.5
+    inset.plot([0, 1], [0.9, 0.9])
+    inset.set(xlim=(0, 1), ylim=(0, 1))
+    on_hidden = {"transform": inset.transAxes, "va": "center"}
+    inset.text(0.2, 1 / 5.5, "hidden", **on_hidden)
+    inset.text(0.8, 1 / 5.5, "runs past the inset", **on_hidden)
+    inset.text(0.5, 0.9, "on the inset line", transform=inset.transAxes, ha="center", va="center")
+    names = ("hidden", "runs past", "inset line")
+    found = sorted(p for p in _collisions(fig) if any(n in p for n in names))
+    assert found == [
+        "text 'on the inset line' overlaps Line2D",
+        "text 'runs past the inset' overlaps Line2D",
+    ]
+    inset.patch.set_visible(False)
+    assert any("'hidden'" in p for p in _collisions(fig))
+
+
+def test_a_short_log_axis_has_no_minor_labels_after_labelling_its_ends():
+    fig, ax = plt.subplots()
+    ax.plot([1, 2], [2, 8])
+    ax.set(yscale="log", ylim=(2, 8))
+    assert fwl_mpl.finish(fig) == []
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in ax.get_yticklabels()] == ["2", "8"]
+    assert not [t.get_text() for t in ax.yaxis.get_minorticklabels() if t.get_text()]
+
+
+def test_colorbar_with_cax_and_a_log_norm_without_limits():
+    fig, ax = plt.subplots()
+    cax = fig.add_axes([0.9, 0.1, 0.03, 0.8])
+    free = matplotlib.cm.ScalarMappable(norm=matplotlib.colors.Normalize(0, 3.3))
+    cb = fwl_mpl.colorbar(free, cax=cax)
+    assert cb.ax is cax and cb.get_ticks()[[0, -1]] == pytest.approx([0, 4])
+    unset = matplotlib.cm.ScalarMappable(norm=matplotlib.colors.LogNorm())
+    with pytest.raises(ValueError, match="log norm"):
+        fwl_mpl.colorbar(unset, ax=ax)
+
+
+def test_plain_horizontal_colorbar_gets_its_ends():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(0, 0.384, 20).reshape(4, 5))
+    cb = fig.colorbar(im, orientation="horizontal")
+    assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
+    assert cb.get_ticks()[[0, -1]] == pytest.approx([0, 0.384])
+
+
+@pytest.mark.parametrize("kind", ["bar", "hist", "scatter", "errorbar", "fill_between", "step"])
+def test_finish_on_common_plot_types(kind):
+    fig, ax = plt.subplots()
+    x = np.linspace(0.4, 9.6, 12)
+    y = 3 + np.sin(x)
+    {
+        "bar": lambda: ax.bar(x, y, width=0.5),
+        "hist": lambda: ax.hist(np.random.default_rng(1).normal(5, 2, 500), bins=15),
+        "scatter": lambda: ax.scatter(x, y),
+        "errorbar": lambda: ax.errorbar(x, y, yerr=0.4, fmt="o"),
+        "fill_between": lambda: ax.fill_between(x, y - 1, y + 1),
+        "step": lambda: ax.step(x, y),
+    }[kind]()
+    data = ax.dataLim
+    assert fwl_mpl.finish(fig) == []
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    assert x0 <= data.x0 and x1 >= data.x1 and y0 <= data.y0 and y1 >= data.y1
+
+
+def test_set_ylim_bottom_labels_the_other_end_exactly():
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0.4, 9.6])
+    ax.set_ylim(bottom=0)
+    top = ax.get_ylim()[1]
+    assert fwl_mpl.finish(fig) == []
+    assert ax.get_yticks()[[0, -1]] == pytest.approx([0, top])
+
+
+def test_markers_are_drawn_whole_on_an_axes_without_default_ticks():
+    fig, ax = plt.subplots()
+    (dots,) = ax.plot(["a", "b", "c"], [0, 5, 10], "o")
+    ax.set(yticks=[0, 5, 10], ylim=(0, 10))
+    assert fwl_mpl.finish(fig) == []
+    assert not dots.get_clip_on()
