@@ -49,7 +49,7 @@ jobs:
       - name: Test the installed wheel outside the source tree
         run: |
           mkdir ../wheeltest
-          cp -R tests ../wheeltest/
+          cp -R tests examples ../wheeltest/
           cd ../wheeltest
           python -c "import fwl_mpl, sys; assert 'site-packages' in fwl_mpl.__file__, fwl_mpl.__file__"
           pytest -q tests

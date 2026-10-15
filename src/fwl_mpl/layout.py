@@ -17,16 +17,23 @@ import math
 
 import matplotlib as mpl
 import numpy as np
+from matplotlib.backends.backend_agg import RendererAgg
 from matplotlib.collections import LineCollection, PathCollection
 from matplotlib.colors import LogNorm, Normalize
+from matplotlib.contour import ContourSet
 from matplotlib.legend import Legend
 from matplotlib.projections.polar import PolarAxes
+from matplotlib.text import Annotation, Text
 from matplotlib.ticker import (
+    AutoLocator,
+    AutoMinorLocator,
     FixedLocator,
     FuncFormatter,
+    LogFormatter,
     LogLocator,
     MaxNLocator,
     MultipleLocator,
+    ScalarFormatter,
 )
 from matplotlib.transforms import Bbox
 
@@ -67,24 +74,40 @@ def _round_limits(vmin, vmax, log=False):
     return lo, hi, ticks[(ticks >= lo) & (ticks <= hi)]
 
 
-def _end_ticks(vmin, vmax, nbins=5):
-    """Ticks inside [vmin, vmax] plus both ends; drop inner ticks that crowd an end."""
+def _end_ticks(vmin, vmax, nbins=5, log=False):
+    """Ticks inside [vmin, vmax] plus both ends; drop inner ticks that crowd an end.
+
+    On a logarithmic scale the inner ticks are powers of ten, spaced in decades.
+    """
+    if log:
+        lo, hi = math.log10(vmin), math.log10(vmax)
+        ticks = np.log10(LogLocator(numticks=nbins + 2).tick_values(vmin, vmax))
+    else:
+        lo, hi = vmin, vmax
+        ticks = _nice_ticks(vmin, vmax, nbins)
+    inner = ticks[(ticks > lo) & (ticks < hi)]
+    step = ticks[1] - ticks[0] if len(ticks) > 1 else (hi - lo)
+    keep = inner[(inner - lo > _CROWD * step) & (hi - inner > _CROWD * step)]
+    return np.concatenate([[vmin], 10.0**keep if log else keep, [vmax]])
+
+
+def _minor_locator(vmin, vmax, nbins):
+    """Minor ticks on the step of the inner major ticks, divided as AutoMinorLocator does."""
     ticks = _nice_ticks(vmin, vmax, nbins)
-    inner = ticks[(ticks > vmin) & (ticks < vmax)]
-    step = ticks[1] - ticks[0] if len(ticks) > 1 else (vmax - vmin)
-    keep = inner[(inner - vmin > _CROWD * step) & (vmax - inner > _CROWD * step)]
-    return np.concatenate([[vmin], keep, [vmax]])
+    step = ticks[1] - ticks[0]
+    mantissa = step / 10 ** math.floor(math.log10(step))
+    return MultipleLocator(step / (5 if np.isclose(mantissa, [1, 5]).any() else 4))
 
 
 def _end_label(value, pos=None):
     """Format a tick value compactly, with the typographic minus of the style."""
-    text = format(value, ".4g")
+    text = format(value, ".6g")
     if mpl.rcParams["axes.unicode_minus"]:
         text = text.replace("-", "\N{MINUS SIGN}")
     return text
 
 
-def colorbar(mappable, ax=None, *, ends="round", **kwargs):
+def colorbar(mappable, *, ax=None, ends="round", **kwargs):
     """Add a colour bar whose lowest and highest colours carry a number.
 
     Parameters
@@ -95,12 +118,15 @@ def colorbar(mappable, ax=None, *, ends="round", **kwargs):
         Axes to take space from, as in ``Figure.colorbar``; defaults to the axes
         of ``mappable``.
     ends : {"round", "label"}
-        ``"round"`` widens the colour range to the nearest tick values, so both
-        ends are round numbers (linear and logarithmic norms). ``"label"`` keeps
-        the range and adds the exact end values as ticks; use it when the range
-        itself matters, such as a symmetric diverging range.
+        ``"round"`` widens the colour range outward to tick values, so both ends
+        are round numbers; this applies to linear and logarithmic norms, while a
+        contour set keeps its levels and other norms keep their range, with the
+        end values as ticks. ``"label"`` keeps the range and adds the exact end
+        values as ticks; use it when the range itself matters, such as a
+        symmetric diverging range.
     **kwargs
-        Passed to ``Figure.colorbar`` (``label``, ``pad``, ``shrink``, ...).
+        Passed to ``Figure.colorbar`` (``cax``, ``label``, ``pad``, ``shrink``,
+        ...). ``ticks`` and ``format`` given here are kept.
 
     Returns
     -------
@@ -109,24 +135,33 @@ def colorbar(mappable, ax=None, *, ends="round", **kwargs):
     Raises
     ------
     ValueError
-        If ``ends`` is not one of the two modes.
+        If ``ends`` is not one of the two modes, or if neither ``ax`` nor the
+        mappable names an axes.
     """
     if ends not in ("round", "label"):
         raise ValueError(f"ends must be 'round' or 'label', got {ends!r}")
+    if ax is None:
+        ax = getattr(mappable, "axes", None)
+    if ax is None:
+        raise ValueError("the mappable is on no axes; pass ax")
     mappable.autoscale_None()
     norm = mappable.norm
     vmin, vmax = norm.vmin, norm.vmax
-    if ends == "round" and type(norm) in (Normalize, LogNorm):
-        vmin, vmax, ticks = _round_limits(vmin, vmax, log=isinstance(norm, LogNorm))
+    log = isinstance(norm, LogNorm)
+    if (
+        ends == "round"
+        and type(norm) in (Normalize, LogNorm)
+        and not isinstance(mappable, ContourSet)
+    ):
+        vmin, vmax, ticks = _round_limits(vmin, vmax, log=log)
         mappable.set_clim(vmin, vmax)
     else:
-        ticks = _end_ticks(vmin, vmax)
-    if ax is None:
-        ax = mappable.axes
-    cb = ax.figure.colorbar(mappable, ax=ax, **kwargs)
+        ticks = _end_ticks(vmin, vmax, log=log)
+    cb = np.ravel(ax)[0].figure.colorbar(mappable, ax=ax, **kwargs)
     cb.outline.set_visible(False)
-    cb.set_ticks(ticks)
-    if ends == "label":
+    if "ticks" not in kwargs:
+        cb.set_ticks(ticks)
+    if ends == "label" and "format" not in kwargs:
         cb.formatter = FuncFormatter(_end_label)
     cb._fwl_ends = True
     return cb
@@ -136,6 +171,8 @@ def label_ends(ax, axis="both"):
     """Put labelled ticks on both limits of an axis whose limits were set by hand.
 
     Call it after the last change to the limits: the ticks it sets are fixed.
+    On a logarithmic axis the inner ticks are powers of ten. Default minor ticks
+    of a linear axis follow the step of the inner major ticks.
 
     Parameters
     ----------
@@ -151,10 +188,14 @@ def label_ends(ax, axis="both"):
         raise ValueError(f"axis must be 'both', 'x' or 'y', got {axis!r}")
     for name in ("x", "y"):
         if axis in ("both", name):
+            axis_ = getattr(ax, f"{name}axis")
             lo, hi = sorted(getattr(ax, f"get_{name}lim")())
-            space = getattr(ax, f"{name}axis").get_tick_space()
-            getattr(ax, f"set_{name}ticks")(_end_ticks(lo, hi, max(1, min(5, space - 1))))
-            getattr(ax, f"{name}axis").set_major_formatter(FuncFormatter(_end_label))
+            nbins = max(1, min(5, axis_.get_tick_space() - 1))
+            log = axis_.get_scale() == "log"
+            getattr(ax, f"set_{name}ticks")(_end_ticks(lo, hi, nbins, log=log))
+            axis_.set_major_formatter(FuncFormatter(_end_label))
+            if not log and isinstance(axis_.get_minor_locator(), AutoMinorLocator):
+                axis_.set_minor_locator(_minor_locator(lo, hi, nbins))
 
 
 def _even_grid(lo, hi, max_ticks):
@@ -183,6 +224,41 @@ def _even_grid(lo, hi, max_ticks):
     return None
 
 
+def _data_range(ax, name):
+    """Return (lo, hi, smallest positive value) of the data on all axes sharing ``name``."""
+    lims = [a.dataLim for a in getattr(ax, f"get_shared_{name}_axes")().get_siblings(ax)]
+    lo = min(getattr(b, f"interval{name}")[0] for b in lims)
+    hi = max(getattr(b, f"interval{name}")[1] for b in lims)
+    return lo, hi, min(getattr(b, f"minpos{name}") for b in lims)
+
+
+def _has_marker(line):
+    return line.get_visible() and line.get_marker() not in (None, "None", "none", " ", "")
+
+
+def _unclip_markers(ax):
+    """Draw whole the markers of a series that lies inside the axes, also on its edges."""
+    box = ax.bbox.padded(0.5)
+    for artist in ax.get_lines() + [c for c in ax.collections if isinstance(c, PathCollection)]:
+        if isinstance(artist, PathCollection):
+            pts = artist.get_offset_transform().transform(artist.get_offsets())
+        elif _has_marker(artist):
+            pts = artist.get_transform().transform(artist.get_xydata())
+        else:
+            continue
+        pts = pts[np.isfinite(pts).all(axis=1)]
+        inside = (pts >= [box.x0, box.y0]) & (pts <= [box.x1, box.y1])
+        if artist.get_clip_on() and len(pts) and inside.all():
+            artist.set_clip_on(False)
+
+
+def _set_lim(ax, name, lo, hi):
+    """Set the limits of an axis and keep its direction."""
+    if getattr(ax, f"{name}axis").get_inverted():
+        lo, hi = hi, lo
+    getattr(ax, f"set_{name}lim")(lo, hi)
+
+
 def round_limits(ax, axis="both"):
     """Set axis limits on an even tick grid just outside the data range.
 
@@ -190,7 +266,9 @@ def round_limits(ax, axis="both"):
     grid widens the data span by at most a tenth and fits the axis length; the
     axis then keeps that step, so both limits carry a tick. Logarithmic axes go
     to whole decades. When no grid fits, the limits are set to the data range,
-    for :func:`label_ends` to label. Axes with dates or other units are left alone.
+    for :func:`label_ends` to label. The data range covers every axes that shares
+    the axis, and an inverted axis stays inverted. Axes with dates, categories or
+    other units are left alone.
 
     Parameters
     ----------
@@ -208,22 +286,23 @@ def round_limits(ax, axis="both"):
         if axis not in ("both", name):
             continue
         ax_ = getattr(ax, f"{name}axis")
-        lo, hi = getattr(ax.dataLim, f"interval{name}")
-        if not (np.isfinite(lo) and np.isfinite(hi)) or lo == hi:
+        lo, hi, minpos = _data_range(ax, name)
+        if getattr(ax, f"get_{name}scale")() == "log":
+            lo = lo if lo > 0 else minpos
+        if not (np.isfinite(lo) and np.isfinite(hi)) or lo >= hi or ax_.have_units():
             continue
         if not isinstance(ax_.get_major_locator(), (MaxNLocator, MultipleLocator, LogLocator)):
             continue
         if getattr(ax, f"get_{name}scale")() == "log":
-            if lo > 0:
-                lo, hi, _ = _round_limits(lo, hi, log=True)
-                getattr(ax, f"set_{name}lim")(lo, hi)
+            lo, hi, _ = _round_limits(lo, hi, log=True)
+            _set_lim(ax, name, lo, hi)
             continue
         grid = _even_grid(lo, hi, max(3, ax_.get_tick_space()))
         if grid is None:
-            getattr(ax, f"set_{name}lim")(lo, hi)
+            _set_lim(ax, name, lo, hi)
             continue
         start, stop, step = grid
-        getattr(ax, f"set_{name}lim")(start, stop)
+        _set_lim(ax, name, start, stop)
         if abs(start / step - round(start / step)) < 1e-9:
             ax_.set_major_locator(MultipleLocator(step))
         else:
@@ -243,8 +322,6 @@ def _snap_to_ticks(ax, name):
     """Move each limit onto a tick when it lies within _SNAP of the span from one."""
     lo, hi = getattr(ax, f"get_{name}lim")()
     ticks = np.asarray(getattr(ax, f"{name}axis").get_major_locator()())
-    if not len(ticks):
-        return
     span = abs(hi - lo)
     new = []
     for v in (lo, hi):
@@ -255,19 +332,57 @@ def _snap_to_ticks(ax, name):
 
 def _has_image(ax):
     return bool(ax.images) or any(
-        type(c).__name__ in ("QuadMesh", "PolyQuadMesh") for c in (ax.collections)
+        type(c).__name__ in ("QuadMesh", "PolyQuadMesh") or getattr(c, "filled", False)
+        for c in ax.collections
     )
+
+
+def _default_ticks(axis):
+    """True when an axis has numbers and the tick locator and formatter of matplotlib."""
+    locator, formatter = axis.get_major_locator(), axis.get_major_formatter()
+    return (
+        not axis.have_units()
+        and type(locator) in (AutoLocator, LogLocator)
+        and isinstance(formatter, (ScalarFormatter, LogFormatter))
+    )
+
+
+def _all_axes(fig):
+    """Every axes of a figure, with inset and secondary axes after their parent."""
+    out = []
+    for ax in fig.axes:
+        out.append(ax)
+        out += _all_axes_below(ax)
+    return out
+
+
+def _all_axes_below(ax):
+    out = []
+    for child in ax.child_axes:
+        out.append(child)
+        out += _all_axes_below(child)
+    return out
+
+
+def _secondary(ax):
+    # A secondary axis takes its limits from its parent; only its labels are checked.
+    return type(ax).__name__ == "SecondaryAxis"
 
 
 def finish(fig):
     """Apply the layout rules to a figure and report what is still wrong.
 
     Axes with automatic limits get an even tick grid just outside their data
-    (:func:`round_limits`), except axes that hold an image or a mesh, whose
-    limits stay at the data or snap to a tick within 2 % of the span. Axes whose
-    ends are then not on a tick get labelled ends, and colour
-    bars made with ``Figure.colorbar`` get their end values as ticks. Polar and
-    3D axes and axes without visible axis lines are left alone.
+    (:func:`round_limits`), except axes that hold an image, a mesh or filled
+    contours, whose limits stay at the data or snap to a tick within 2 % of the
+    span. Axes whose ends are then not on a tick get labelled ends, and colour
+    bars made with ``Figure.colorbar`` whose ends carry no tick get their end
+    values as ticks. Markers of a series that lies inside its axes are drawn
+    whole, so a point on an axis limit is not cut in half.
+    Inset axes count as axes. Only axes with the tick locator and formatter of
+    matplotlib change: an axis with ticks set by hand, or with dates, categories
+    or other units, keeps them. Polar, 3D and secondary axes and axes without
+    visible axis lines are left alone.
 
     Parameters
     ----------
@@ -279,20 +394,20 @@ def finish(fig):
         The problems :func:`check_figure` finds afterwards; empty when the
         figure follows the rules.
     """
-    plain = []
-    for ax in fig.axes:
+    plain, bars = [], []
+    for ax in _all_axes(fig):
         cb = getattr(ax, "_colorbar", None)
         if cb is not None:
             if not getattr(cb, "_fwl_ends", False):
-                cb.set_ticks(_end_ticks(cb.norm.vmin, cb.norm.vmax))
-                cb.formatter = FuncFormatter(_end_label)
-                cb._fwl_ends = True
+                bars.append(cb)
             continue
-        if isinstance(ax, PolarAxes) or ax.name == "3d" or not ax.axison:
+        if isinstance(ax, PolarAxes) or ax.name == "3d" or not ax.axison or _secondary(ax):
             continue
-        plain.append(ax)
         image = _has_image(ax)
         for name in ("x", "y"):
+            if not _default_ticks(getattr(ax, f"{name}axis")):
+                continue
+            plain.append((ax, name))
             if not getattr(ax, f"get_autoscale{name}_on")():
                 continue
             if image:
@@ -301,10 +416,18 @@ def finish(fig):
                 round_limits(ax, name)
     # Tick locators settle only once the figure is laid out.
     fig.draw_without_rendering()
-    for ax in plain:
-        for name in ("x", "y"):
-            if not _ends_on_ticks(ax, name):
-                label_ends(ax, name)
+    for ax, name in plain:
+        if not _ends_on_ticks(ax, name):
+            label_ends(ax, name)
+    for ax in {ax for ax, _ in plain}:
+        _unclip_markers(ax)
+    for cb in bars:
+        axis = cb.ax.yaxis if cb.orientation == "vertical" else cb.ax.xaxis
+        if not _ends_on_ticks(cb.ax, axis.axis_name):
+            lo, hi = sorted(axis.get_view_interval())
+            cb.set_ticks(_end_ticks(lo, hi, log=axis.get_scale() == "log"))
+            cb.formatter = FuncFormatter(_end_label)
+        cb._fwl_ends = True
     return check_figure(fig)
 
 
@@ -339,20 +462,29 @@ def _visible_ticklabels(axis):
     return out
 
 
+def _figures(fig):
+    """The figure and its subfigures, at every depth."""
+    out = [fig]
+    for sub in fig.subfigs:
+        out += _figures(sub)
+    return out
+
+
 def _texts(fig):
     """Every visible text box of the figure, legends as one box each."""
     items = []
-    for t in fig.texts:
-        if t.get_visible() and t.get_text():
-            items.append(t)
-    for ax in fig.axes:
+    for f in _figures(fig):
+        items += [t for t in f.texts if t.get_visible() and t.get_text()]
+        items += [legend for legend in f.legends if legend.get_visible()]
+    for ax in _all_axes(fig):
         if not ax.get_visible():
             continue
         if ax.axison:
             for axis in (ax.xaxis, ax.yaxis):
                 items += _visible_ticklabels(axis)
-                if axis.label.get_visible() and axis.label.get_text():
-                    items.append(axis.label)
+                for text in (axis.label, axis.offsetText):
+                    if text.get_visible() and text.get_text():
+                        items.append(text)
         for title in (ax.title, ax._left_title, ax._right_title):
             if title.get_visible() and title.get_text():
                 items.append(title)
@@ -360,16 +492,13 @@ def _texts(fig):
         legend = ax.get_legend()
         if legend is not None and legend.get_visible():
             items.append(legend)
-    for legend in fig.legends:
-        if legend.get_visible():
-            items.append(legend)
     return items
 
 
 def _obstacles(fig):
     """Data lines, markers, error bars and axis lines, in display coordinates."""
     out = []
-    for ax in fig.axes:
+    for ax in _all_axes(fig):
         if not ax.get_visible():
             continue
         for line in ax.get_lines():
@@ -427,10 +556,17 @@ def _hits(bbox, path, points, radius):
     return False
 
 
+def _extent(item, renderer):
+    # The box of an annotation's text alone: its arrow points at data on purpose.
+    if isinstance(item, Annotation):
+        return Text.get_window_extent(item, renderer)
+    return item.get_window_extent(renderer)
+
+
 def _collisions(fig, renderer):
     problems = []
     texts = _texts(fig)
-    boxes = [_shrunk(t.get_window_extent(renderer)) for t in texts]
+    boxes = [_shrunk(_extent(t, renderer)) for t in texts]
     for i, (a, ba) in enumerate(zip(texts, boxes, strict=True)):
         for b, bb in zip(texts[i + 1 :], boxes[i + 1 :], strict=True):
             if ba.overlaps(bb):
@@ -445,12 +581,14 @@ def _collisions(fig, renderer):
 
 def _unlabelled_ends(fig):
     problems = []
-    for n, ax in enumerate(fig.axes):
+    for n, ax in enumerate(_all_axes(fig)):
         if not (ax.get_visible() and ax.axison) or isinstance(ax, PolarAxes) or ax.name == "3d":
             continue
+        if _secondary(ax):
+            continue
         for name, axis in (("x", ax.xaxis), ("y", ax.yaxis)):
-            if not _visible_ticklabels(axis):
-                continue  # tick labels hidden on purpose, for example a shared axis
+            if axis.have_units() or not _visible_ticklabels(axis):
+                continue  # dates and categories, or tick labels hidden on purpose
             shown = {
                 float(tick.get_loc())
                 for tick in axis.get_major_ticks()
@@ -482,9 +620,14 @@ def check_figure(fig):
         colour-bar ends without a tick label. Empty when the figure follows the
         rules. Rotated text is tested by its upright bounding box, which is larger
         than the glyphs, so rotated labels need clear space around them. Filled
-        areas and images are not obstacles, and polar and 3D axes are not tested
-        for labelled ends.
+        areas and images are not obstacles, and an annotation is tested by its
+        text, not its arrow. Polar, 3D and secondary axes, and axes with dates,
+        categories or other units, are not tested for labelled ends.
     """
     fig.draw_without_rendering()
-    renderer = fig.canvas.get_renderer()
+    get_renderer = getattr(fig.canvas, "get_renderer", None)
+    if get_renderer is None:  # canvases other than Agg, such as PDF or a bare Figure
+        renderer = RendererAgg(fig.bbox.width, fig.bbox.height, fig.dpi)
+    else:
+        renderer = get_renderer()
     return _collisions(fig, renderer) + _unlabelled_ends(fig)
