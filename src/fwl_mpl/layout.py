@@ -156,7 +156,10 @@ def _end_ticks(vmin, vmax, nbins=5, log=False):
     inner = ticks[(ticks > lo) & (ticks < hi)]
     step = ticks[1] - ticks[0] if len(ticks) > 1 else (hi - lo)
     keep = inner[(inner - lo > _CROWD * step) & (hi - inner > _CROWD * step)]
-    if not log:  # an end that is zero but for rounding error is labelled 0
+    if not log:
+        # A 6-digit label shows 1000.005 as 1000.01, the label of an end.
+        keep = keep[np.array([_label_is_exact(t) for t in keep], dtype=bool)]
+        # An end that is zero but for rounding error is labelled 0.
         noise = 64 * np.finfo(float).eps * max(abs(vmin), abs(vmax))
         vmin = 0.0 if abs(vmin) <= noise else vmin
         vmax = 0.0 if abs(vmax) <= noise else vmax
@@ -199,12 +202,13 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         range by at most a tenth; otherwise each end is rounded outward to 2
         significant digits and labelled, with up to 6 digits when 2 would widen
         the range by more than a tenth, and tick values again when 6 still would.
-        An end within 1e-7 of a rounded value keeps the data value and shows the
-        rounded one. A logarithmic norm goes to whole decades, a contour set
-        keeps its levels, and other norms keep their range, with the end
-        values as ticks. ``"label"`` keeps the range and adds the exact end
-        values as ticks; use it when the range itself matters, such as a
-        symmetric diverging range.
+        An end within a relative 1e-7 of a rounded value keeps the data value
+        and shows the rounded one. A logarithmic norm goes to whole decades, a
+        contour set keeps its levels, and other norms keep their range, with
+        the end values as ticks. ``"label"`` keeps the range and adds the end
+        values as ticks, labelled to 6 significant digits; use it when the
+        range itself matters, such as a symmetric diverging range. Inner ticks
+        that a 6-digit label cannot show are left out.
     **kwargs
         Passed to ``Figure.colorbar`` (``cax``, ``label``, ``pad``, ``shrink``,
         ...). ``ticks`` and ``format`` given here are kept.
@@ -250,8 +254,6 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         if digit is not None and not _singular(*digit):
             lo, hi = digit
             ticks, exact = _end_ticks(lo, hi), True
-            inner = [t for t in ticks[1:-1] if _label_is_exact(t)]  # 1000.005 prints as 1000.01
-            ticks = np.array([lo, *inner, hi])
         vmin, vmax = lo, hi
         mappable.set_clim(vmin, vmax)
     else:

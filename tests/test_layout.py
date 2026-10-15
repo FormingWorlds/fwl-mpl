@@ -354,6 +354,7 @@ def test_colorbar_round_of_float32_data_rounds_to_the_decimal_value(lo, hi, ends
     fig.draw_without_rendering()
     labels = [t.get_text() for t in cb.ax.get_yticklabels()]
     assert (labels[0], labels[-1]) == ends
+    assert len(set(labels)) == len(labels)
 
 
 def test_digit_limits_keep_data_a_rounding_error_past_a_rounded_end():
@@ -418,6 +419,54 @@ def test_colorbar_round_of_float32_data_above_its_decimal_value():
     assert im.get_clim() == (float(np.float32(0.12)), float(np.float32(0.3)))
     fig.draw_without_rendering()
     assert [t.get_text() for t in cb.ax.get_yticklabels()] == ["0.12", "0.2", "0.25", "0.3"]
+
+
+@pytest.mark.parametrize(
+    ("data", "labels"),
+    [
+        ((0.1 + 0.2 - 0.3, 0.0361), ["0", "0.01", "0.02", "0.037"]),
+        ((-3.6, 0.1 + 0.2 - 0.3), [f"{M}3.6", f"{M}2", f"{M}1", "0"]),
+    ],
+)
+def test_colorbar_round_labels_an_end_that_is_zero_but_for_rounding_error_0(data, labels):
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.array([data]))
+    cb = fwl_mpl.colorbar(im)
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in cb.ax.get_yticklabels()] == labels
+    assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
+
+
+def test_colorbar_label_drops_inner_ticks_the_label_cannot_show():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(-8647.37, -8647.36, 20, dtype=np.float32).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im, ends="label")
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in cb.ax.get_yticklabels()] == [f"{M}8647.37", f"{M}8647.36"]
+
+
+def test_end_ticks_keep_the_inner_ticks_the_label_shows():
+    assert list(layout._end_ticks(99999.5, 100000.5)) == pytest.approx(
+        [99999.5, 99999.8, 1e5, 100000.5]
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "exact"),
+    [
+        (0.0, True),
+        (-0.0, True),
+        (0.1 + 0.2, True),
+        (-2.5, True),
+        (5e-5, True),
+        (1.3e6, True),
+        (1234567.0, False),
+        (1000.005, False),
+        (-8647.365, False),
+    ],
+)
+def test_label_is_exact(value, exact):
+    assert layout._label_is_exact(value) == exact
 
 
 def test_colorbar_round_drops_inner_ticks_the_label_cannot_show():
