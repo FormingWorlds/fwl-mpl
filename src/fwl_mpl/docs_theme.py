@@ -220,6 +220,7 @@ _RULES = [
     (["button", "input", "optgroup", "select", "textarea"], [f"font-family: {SANS}"]),
     (_HEADINGS, ["color: var(--fwl-ink)", "font-weight: 500", "letter-spacing: -0.005em"]),
     ([f"{h} a.docs-heading-anchor" for h in _HEADINGS], ["color: inherit"]),
+    ([f"{h} a.docs-heading-anchor code" for h in _HEADINGS], ["color: var(--fwl-ink)"]),
     ([".content strong", ".content b", "th"], ["color: inherit", "font-weight: 500"]),
     ([".content a", ".content a code", ".content a:hover code"], ["color: var(--fwl-link)"]),
     ([".content a:hover"], ["color: var(--fwl-link)", "text-decoration: underline"]),
