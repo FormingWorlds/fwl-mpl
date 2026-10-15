@@ -248,6 +248,7 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
     if log and not (np.isfinite(vmin) and vmin > 0):
         raise ValueError(f"a log norm needs a positive vmin, got {vmin}")
     exact = ends == "label"
+    own = "format" not in kwargs  # the ticks get _end_label when exact
     if (
         ends == "round"
         and type(norm) in (Normalize, LogNorm)
@@ -259,16 +260,16 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
             digit = _digit_limits(vmin, vmax)
         if digit is not None and not _singular(*digit):
             lo, hi = digit
-            ticks, exact = _end_ticks(lo, hi), True
+            ticks, exact = _end_ticks(lo, hi, labelled=own), True
         vmin, vmax = lo, hi
         mappable.set_clim(vmin, vmax)
     else:
-        ticks = _end_ticks(vmin, vmax, log=log, labelled=exact)
+        ticks = _end_ticks(vmin, vmax, log=log, labelled=exact and own)
     cb = np.ravel(host)[0].figure.colorbar(mappable, ax=ax, **kwargs)
     cb.outline.set_visible(False)
     if "ticks" not in kwargs:
         cb.set_ticks(ticks)
-    if exact and "format" not in kwargs:
+    if exact and own:
         cb.formatter = FuncFormatter(_end_label)
     cb._fwl_ends = True
     return cb

@@ -464,15 +464,53 @@ def test_contour_colorbar_keeps_the_inner_ticks_of_its_offset_labels():
     x, y = np.meshgrid(np.linspace(0, 1, 20), np.linspace(0, 1, 20))
     fig, ax = plt.subplots()
     cb = fwl_mpl.colorbar(ax.contourf(x, y, 123456.7 + 0.2 * x))
-    assert len(cb.get_ticks()) > 2  # 123456.75 needs 7 digits, but the offset label shows it
+    fig.draw_without_rendering()  # 123456.75 needs 7 digits, but the offset label shows it
+    assert list(cb.get_ticks()) == pytest.approx(
+        [123456.7, 123456.75, 123456.8, 123456.85, 123456.9], rel=1e-12
+    )
+    assert [t.get_text() for t in cb.ax.get_yticklabels()] == [
+        "0.70",
+        "0.75",
+        "0.80",
+        "0.85",
+        "0.90",
+    ]
 
 
-def test_end_ticks_keep_the_inner_ticks_the_label_shows():
+@pytest.mark.parametrize(
+    ("lo", "hi", "labels"),
+    [
+        (1000.0078, 1000.0178, ["1000.01", "1000.02"]),
+        (-1000.0178, -1000.0078, [f"{M}1000.02", f"{M}1000.01"]),
+    ],
+)
+def test_finish_drops_inner_ticks_that_print_like_an_end_of_a_plain_colorbar(lo, hi, labels):
+    fig, ax = plt.subplots()
+    fig.colorbar(ax.imshow(np.array([[lo, hi]])))
+    assert fwl_mpl.finish(fig) == []
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in fig.axes[1].get_yticklabels()] == labels
+
+
+def test_colorbar_with_a_format_keeps_the_ticks_its_labels_show():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.array([[100000.0, 100000.3]]))
+    cb = fwl_mpl.colorbar(im, ends="label", format="%.1f")
+    assert list(cb.get_ticks()) == pytest.approx(
+        [100000.0, 100000.1, 100000.2, 100000.3], rel=1e-12
+    )
+    im = ax.imshow(np.array([[61357.42, 61358.48]]))
+    cb = fwl_mpl.colorbar(im, format="%.2f")  # digit ends 61357.4 and 61358.5
+    expected = [61357.4, 61357.75, 61358.0, 61358.25, 61358.5]
+    assert list(cb.get_ticks()) == pytest.approx(expected, rel=1e-12)
+
+
+def test_end_ticks_keep_only_inner_ticks_the_label_shows_apart():
     ticks = layout._end_ticks(99999.5, 100000.5)  # 100000.2 needs 7 digits; 100000.5 prints 100000
-    assert list(ticks) == pytest.approx([99999.5, 99999.8, 100000.5])
+    assert list(ticks) == pytest.approx([99999.5, 99999.8, 100000.5], rel=1e-12)
     assert len(layout._end_ticks(99999.5, 100000.5, labelled=False)) == 5
     ticks = layout._end_ticks(1000.0, 1000.021)  # 1000.015 would print like the tick 1000.01
-    assert list(ticks) == pytest.approx([1000.0, 1000.01, 1000.021])
+    assert list(ticks) == pytest.approx([1000.0, 1000.01, 1000.021], rel=1e-12)
 
 
 @pytest.mark.parametrize(
