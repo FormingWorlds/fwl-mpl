@@ -72,6 +72,22 @@ For more than 8 series, vary the line style or use a sequential colour map.
 
 `fwl_mpl.cmap("diverging", mode)` returns the map for a role; `cmc.batlow` is the default image colour map. The maps are from Crameri, F., Scientific colour maps, Zenodo, doi:10.5281/zenodo.1243862; cite them when a figure uses one.
 
+## Documenter.jl pages
+
+`fwl_mpl.docs_theme` restyles the stock Documenter.jl light and dark themes with the lab palette and IBM Plex, so a Julia docs site matches the figures. The stylesheet is generated from the palette, so the figures and the pages stay on one set of colours. Run, from the repository that holds the docs:
+
+```bash
+python -m fwl_mpl.docs_theme docs/src/assets
+```
+
+then list the stylesheet in `docs/make.jl`:
+
+```julia
+format = Documenter.HTML(; assets = ["assets/fwl.css"])
+```
+
+The command writes `fwl.css` and the fonts (`fwl-fonts/`, with the OFL licence) into the folder. Keep `documenter-light` as the primary theme and `documenter-dark` as the primary dark theme, which is the Documenter default; the stylesheet follows the reader's choice in the settings dialog. Text and link colours are the palette hues moved toward the ink colour until they reach 4.5:1 contrast on the page and on the code background; admonition borders and fills use the unmodified palette. The stylesheet was checked against Documenter.jl 1.19.
+
 ## Math and symbols
 
 Math text uses IBM Plex Sans with its italic for variables and upright text for `\mathrm{}`. IBM Plex Sans covers the Greek alphabet with one exception that matters in practice: matplotlib draws `\phi` as ϕ (U+03D5), which the font lacks, so write `\varphi` for φ. The variant forms `\vartheta`, `\varpi`, `\varrho` and `\varkappa` and the archaic `\digamma` and `\backepsilon` are missing too and come from STIX Sans. Glyphs the font does not have, such as ∇, ∝, ⊕ and ☉, come from STIX Sans in math and from DejaVu Sans in plain text. Write `M_\mathrm{Earth}` rather than `M_\oplus`. With matplotlib 3.8 or newer, `fwl_mpl.use()` also sets bold italic math (`\mathbfit`) to IBM Plex Sans Medium Italic. IBM Plex has no calligraphic letters, so `\mathcal` draws the italic.
