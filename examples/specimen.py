@@ -45,8 +45,15 @@ def specimen(mode):
         peak = (1500 - 8 * (80 - r)) * (1 - np.exp(-r / 25))
         ax.plot(t, 300 + peak * (t / tau) * np.exp(1 - t / tau), label=f"{r} km")
     ax.set(xlabel=r"Time after CAI, $t$ (Myr)", ylabel=r"Peak temperature, $T_\mathrm{max}$ (K)")
-    ax.set_ylim(250, 2500)
-    ax.legend(ncol=4, loc="upper center", fontsize=6, handlelength=1.0, columnspacing=0.7)
+    ax.set_ylim(0, 3000)  # headroom above the curves for the legend
+    ax.legend(
+        ncol=2,
+        loc="upper right",
+        fontsize=7,
+        handlelength=1.0,
+        columnspacing=0.8,
+        labelspacing=0.25,
+    )
 
     # b: models with uncertainty bands and observed points
     ax = axs[1]
@@ -73,14 +80,15 @@ def specimen(mode):
         xlabel=r"Mass, $M_\mathrm{p}$ ($M_\mathrm{Earth}$)",
         ylabel=r"Radius, $R_\mathrm{p}$ ($R_\mathrm{Earth}$)",
     )
-    ax.legend(loc="lower right")
+    ax.set_ylim(0, 2.5)  # room below the curves for the legend
+    ax.legend(loc="lower right", labelspacing=0.25)
 
     # c: sequential field
     ax = axs[2]
     x, y = np.meshgrid(np.linspace(0, 1, 200), np.linspace(0, 5, 200))
     phi = 0.2 * (1 - np.tanh((y - 1.5 - 2.5 * x**2) * 1.8))
     im = ax.pcolormesh(x, y, phi, cmap=fwl_mpl.cmap("sequential", mode), rasterized=True)
-    fig.colorbar(im, ax=ax, label=r"Porosity, $\varphi$").outline.set_visible(False)
+    fwl_mpl.colorbar(im, ax=ax, label=r"Porosity, $\varphi$")
     ax.set(xlabel=r"Normalised radius, $r/R$", ylabel=r"Time, $t$ (Myr)")
 
     # d: diverging field on a polar grid
@@ -92,9 +100,14 @@ def specimen(mode):
     ax_pol.set_xticklabels([])
     ax_pol.set_yticklabels([])
     ax_pol.grid(False)
-    fig.colorbar(
-        im, ax=ax_pol, pad=0.08, shrink=0.85, label=r"Temperature anomaly, $\Delta T$ (K)"
-    ).outline.set_visible(False)
+    fwl_mpl.colorbar(
+        im,
+        ax=ax_pol,
+        ends="label",
+        pad=0.08,
+        shrink=0.85,
+        label=r"Temperature anomaly, $\Delta T$ (K)",
+    )
 
     # e: all 8 colours as stacked fills
     ax = axs[3]
@@ -123,9 +136,9 @@ def specimen(mode):
     for j, (label, row) in enumerate(rows.items()):
         for i, c in enumerate(row):
             ax.add_patch(plt.Rectangle((i, -j), 0.92, 0.85, color=c, lw=0))
-        ax.text(-0.15, -j + 0.42, label, ha="right", va="center", fontsize=6, color=surf["muted"])
+        ax.text(-0.15, -j + 0.42, label, ha="right", va="center", fontsize=6.5, color=surf["muted"])
     for i, name in enumerate(fwl_mpl.NAMES):
-        ax.text(i + 0.46, 1.0, name, rotation=50, ha="left", va="bottom", fontsize=6)
+        ax.text(i + 0.46, 1.0, name, rotation=90, ha="center", va="bottom", fontsize=6.5)
     ax.set(xlim=(-1.6, 8.1), ylim=(-4.3, 2.8))
     ax.axis("off")
 
@@ -139,6 +152,9 @@ if __name__ == "__main__":
     out.mkdir(parents=True, exist_ok=True)
     for mode in fwl_mpl.MODES:
         fig = specimen(mode)
+        problems = fwl_mpl.finish(fig)
+        if problems:
+            raise SystemExit("layout problems:\n" + "\n".join(problems))
         for ext in ("png", "pdf"):
             fig.savefig(out / f"specimen_{mode}.{ext}", dpi=200)
         plt.close(fig)

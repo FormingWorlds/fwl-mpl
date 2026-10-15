@@ -388,7 +388,7 @@ def test_panel_label_defaults_and_override():
     assert t.get_horizontalalignment() == "right"
     assert t.get_verticalalignment() == "bottom"
     assert t.get_fontweight() in ("medium", 500)
-    assert t.get_fontsize() == pytest.approx(8.5)
+    assert t.get_fontsize() == pytest.approx(9.5)
     t2 = fwl_mpl.panel_label(ax, "c", ha="left", color="red", size=12, weight="bold")
     assert t2.get_horizontalalignment() == "left"
     assert t2.get_color() == "red"

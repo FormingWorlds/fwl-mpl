@@ -36,10 +36,15 @@ __all__ = [
     "NAMES",
     "PALETTE",
     "SURFACES",
+    "check_figure",
     "cmap",
+    "colorbar",
     "colors",
+    "finish",
+    "label_ends",
     "panel_label",
     "register_fonts",
+    "round_limits",
     "use",
 ]
 
@@ -277,6 +282,8 @@ def panel_label(ax, label, **kwargs):
     text = getattr(ax, "text2D", ax.text)
     return text(-0.02, 1.03, label, **opts)
 
+
+from .layout import check_figure, colorbar, finish, label_ends, round_limits  # noqa: E402
 
 register_fonts()
 _logger = logging.getLogger("matplotlib.font_manager")
