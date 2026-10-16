@@ -147,15 +147,17 @@ def specimen(mode):
     return fig
 
 
+DPI = 200  # of the saved specimen; finish checks the layout at it
+
 if __name__ == "__main__":
     out = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).parent / "output")
     out.mkdir(parents=True, exist_ok=True)
     for mode in fwl_mpl.MODES:
         fig = specimen(mode)
-        problems = fwl_mpl.finish(fig)
+        problems = fwl_mpl.finish(fig, dpi=DPI)
         if problems:
             raise SystemExit("layout problems:\n" + "\n".join(problems))
         for ext in ("png", "pdf"):
-            fig.savefig(out / f"specimen_{mode}.{ext}", dpi=200)
+            fig.savefig(out / f"specimen_{mode}.{ext}", dpi=DPI)
         plt.close(fig)
         print("wrote", out / f"specimen_{mode}.png")
