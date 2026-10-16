@@ -14,6 +14,7 @@ whose ends carry no number. Moving a legend or a label is left to the author.
 """
 
 import math
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Context, Decimal, localcontext
 
 import matplotlib as mpl
 import numpy as np
@@ -53,9 +54,28 @@ _CROWD = 0.75
 # An image or mesh edge this close to a tick, as a fraction of the span, is
 # snapped to the tick; a mesh drawn from cell centres overhangs by half a cell.
 _SNAP = 0.02
-# Rounding may widen an axis by at most this fraction of the data span; past it
-# the limits stay at the data and the exact ends are labelled instead.
+# Rounding may widen an axis or a colour range by at most this fraction of the
+# data span; past it an axis keeps the data limits and a colour bar rounds digits.
 _MAX_GROW = 0.1
+# Significant digits of an end label; colour bar ends are rounded to at most this many.
+_LABEL_DIGITS = 6
+# A value within this fraction of a rounded value counts as on it; float32 data
+# are off by up to 6e-8 (a float32 0.7 is 0.699999988).
+_DIGIT_TOL = Decimal("1e-7")
+_DECIMAL = Context(  # every field set, so no global decimal setting applies
+    prec=40,
+    rounding=ROUND_HALF_EVEN,
+    Emin=-999999,
+    Emax=999999,
+    capitals=1,
+    clamp=0,
+    flags=[],
+    traps=[],
+)
+# Matplotlib widens a colour range narrower than this fraction of its largest end,
+# and replaces one whose ends are both smaller than _SMALLEST.
+_TINY = 1e-15
+_SMALLEST = 1e6 / _TINY * np.finfo(float).tiny
 
 
 def _nice_ticks(vmin, vmax, nbins=5):
@@ -76,10 +96,58 @@ def _round_limits(vmin, vmax, log=False):
     return lo, hi, ticks[(ticks >= lo - tol) & (ticks <= hi + tol)]
 
 
-def _end_ticks(vmin, vmax, nbins=5, log=False):
+def _round_digits(value, digits, up):
+    """Round ``value`` up or down to ``digits`` significant digits.
+
+    A value within _DIGIT_TOL of a rounded value goes to that value, also when it
+    lies on the other side; callers keep the data inside with min and max.
+    """
+    if value == 0 or not math.isfinite(value):
+        return float(value) + 0.0  # -0.0 becomes 0.0
+    with localcontext(_DECIMAL):
+        d = Decimal(repr(float(value)))  # the shortest decimal: 3.3, not 3.29999...
+        exp = d.adjusted() - digits + 1
+        q = d.scaleb(-exp)
+        tol = abs(q) * _DIGIT_TOL
+        k = (q - tol if up else q + tol).to_integral_value(ROUND_CEILING if up else ROUND_FLOOR)
+        return float(k.scaleb(exp))
+
+
+def _singular(vmin, vmax):
+    """Return whether a colour bar would widen [vmin, vmax], as matplotlib's nonsingular does."""
+    if not (np.isfinite(vmin) and np.isfinite(vmax)):
+        return True
+    big = max(abs(vmin), abs(vmax))
+    return big < _SMALLEST or vmax - vmin <= _TINY * big
+
+
+def _label_is_exact(value):
+    """Return whether the end label shows ``value`` without rounding."""
+    return math.isclose(float(format(value, f".{_LABEL_DIGITS}g")), value, rel_tol=1e-12)
+
+
+def _digit_limits(vmin, vmax):
+    """Expand a range outward to significant digits per end; return (lo, hi) or None.
+
+    The digit count is the smallest from 2 to _LABEL_DIGITS that gives 2 different
+    rounded ends and widens the span by at most _MAX_GROW; None when none does. An
+    end within _DIGIT_TOL of a rounded value keeps the data value.
+    """
+    for digits in range(2, _LABEL_DIGITS + 1):
+        down = _round_digits(vmin, digits, up=False)
+        up = _round_digits(vmax, digits, up=True)
+        lo, hi = min(down, vmin), max(up, vmax)
+        if down < up and hi - lo <= (1 + _MAX_GROW) * (vmax - vmin):
+            return lo, hi
+    return None
+
+
+def _end_ticks(vmin, vmax, nbins=5, log=False, labelled=True):
     """Ticks inside [vmin, vmax] plus both ends; drop inner ticks that crowd an end.
 
     On a logarithmic scale the inner ticks are powers of ten, spaced in decades.
+    With ``labelled`` (the ticks get _end_label), a linear scale also drops inner
+    ticks that the label cannot show exactly or that print like an end.
     """
     if log:
         lo, hi = math.log10(vmin), math.log10(vmax)
@@ -90,10 +158,16 @@ def _end_ticks(vmin, vmax, nbins=5, log=False):
     inner = ticks[(ticks > lo) & (ticks < hi)]
     step = ticks[1] - ticks[0] if len(ticks) > 1 else (hi - lo)
     keep = inner[(inner - lo > _CROWD * step) & (hi - inner > _CROWD * step)]
-    if not log:  # an end that is zero but for rounding error is labelled 0
+    if not log:
+        # An end that is zero but for rounding error is labelled 0.
         noise = 64 * np.finfo(float).eps * max(abs(vmin), abs(vmax))
         vmin = 0.0 if abs(vmin) <= noise else vmin
         vmax = 0.0 if abs(vmax) <= noise else vmax
+    if not log and labelled:
+        # A 6-digit label shows 1000.005, and an end at 1000.0078, as 1000.01.
+        ends = {_end_label(vmin), _end_label(vmax)}
+        exact = [_label_is_exact(t) and _end_label(t) not in ends for t in keep]
+        keep = keep[np.array(exact, dtype=bool)]
     return np.concatenate([[vmin], 10.0**keep if log else keep, [vmax]])
 
 
@@ -111,7 +185,7 @@ def _minor_locator(vmin, vmax, nbins, name, ndivs=None):
 
 def _end_label(value, pos=None):
     """Format a tick value compactly, with the typographic minus of the style."""
-    text = format(value, ".6g")
+    text = format(value, f".{_LABEL_DIGITS}g")
     if mpl.rcParams["axes.unicode_minus"]:
         text = text.replace("-", "\N{MINUS SIGN}")
     return text
@@ -129,11 +203,18 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
         of ``mappable``.
     ends : {"round", "label"}
         ``"round"`` widens the colour range outward to tick values, so both ends
-        are round numbers; this applies to linear and logarithmic norms, while a
-        contour set keeps its levels and other norms keep their range, with the
-        end values as ticks. ``"label"`` keeps the range and adds the exact end
-        values as ticks; use it when the range itself matters, such as a
-        symmetric diverging range.
+        are round numbers. On a linear norm this happens only when it widens the
+        range by at most a tenth; otherwise each end is rounded outward to 2
+        significant digits and labelled, with up to 6 digits when 2 would widen
+        the range by more than a tenth, and tick values again when 6 still would.
+        An end within a relative 1e-7 of a rounded value keeps the data value
+        and shows the rounded one. A logarithmic norm goes to whole decades, a
+        contour set keeps its levels, and other norms keep their range, with
+        the end values as ticks. ``"label"`` keeps the range and adds the end
+        values as ticks, labelled to 6 significant digits; use it when the
+        range itself matters, such as a symmetric diverging range. With a
+        6-digit label, inner ticks that it cannot show, or that print like an
+        end, are left out.
     **kwargs
         Passed to ``Figure.colorbar`` (``cax``, ``label``, ``pad``, ``shrink``,
         ...). ``ticks`` and ``format`` given here are kept.
@@ -166,20 +247,29 @@ def colorbar(mappable, *, ax=None, ends="round", **kwargs):
     log = isinstance(norm, LogNorm)
     if log and not (np.isfinite(vmin) and vmin > 0):
         raise ValueError(f"a log norm needs a positive vmin, got {vmin}")
+    exact = ends == "label"
+    own = "format" not in kwargs  # the ticks get _end_label when exact
     if (
         ends == "round"
         and type(norm) in (Normalize, LogNorm)
         and not isinstance(mappable, ContourSet)
     ):
-        vmin, vmax, ticks = _round_limits(vmin, vmax, log=log)
+        lo, hi, ticks = _round_limits(vmin, vmax, log=log)
+        digit = None
+        if not log and hi - lo > (1 + _MAX_GROW) * (vmax - vmin):
+            digit = _digit_limits(vmin, vmax)
+        if digit is not None and not _singular(*digit):
+            lo, hi = digit
+            ticks, exact = _end_ticks(lo, hi, labelled=own), True
+        vmin, vmax = lo, hi
         mappable.set_clim(vmin, vmax)
     else:
-        ticks = _end_ticks(vmin, vmax, log=log)
+        ticks = _end_ticks(vmin, vmax, log=log, labelled=exact and own)
     cb = np.ravel(host)[0].figure.colorbar(mappable, ax=ax, **kwargs)
     cb.outline.set_visible(False)
     if "ticks" not in kwargs:
         cb.set_ticks(ticks)
-    if ends == "label" and "format" not in kwargs:
+    if exact and own:
         cb.formatter = FuncFormatter(_end_label)
     cb._fwl_ends = True
     return cb
@@ -190,8 +280,9 @@ def label_ends(ax, axis="both"):
 
     Call it after the last change to the limits: the ticks it sets are fixed.
     On a logarithmic axis the inner ticks are powers of ten and minor ticks carry
-    no label. Default minor ticks of a linear axis follow the step of the inner
-    major ticks.
+    no label. On a linear axis, inner ticks that a 6-digit label cannot show, or
+    that print like an end, are left out, and default minor ticks follow the
+    step of the major tick grid.
 
     Parameters
     ----------

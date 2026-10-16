@@ -1,5 +1,6 @@
 """Layout rules: the collision checker, labelled axis ends and colour bars."""
 
+import math
 import runpy
 from pathlib import Path
 
@@ -14,6 +15,7 @@ import pytest  # noqa: E402
 import fwl_mpl  # noqa: E402
 from fwl_mpl import layout  # noqa: E402
 
+M = "\N{MINUS SIGN}"
 SPECIMEN = Path(__file__).resolve().parents[1] / "examples" / "specimen.py"
 
 
@@ -274,6 +276,330 @@ def test_colorbar_round_widens_to_tick_values_and_labels_both_ends():
     assert cb.get_ticks()[[0, -1]] == pytest.approx([0, 0.4])
     assert not cb.outline.get_visible()
     assert not [p for p in fwl_mpl.check_figure(fig) if "axes 1" in p]
+
+
+@pytest.mark.parametrize(
+    ("data", "clim", "labels"),
+    [
+        ((0, 3.3), (0, 3.3), ["0", "1", "2", "3.3"]),
+        ((0.000918805, 3.29872), (0.00091, 3.3), ["0.00091", "1", "2", "3.3"]),
+        ((2.3, 7.6), (2.3, 7.6), ["2.3", "4", "6", "7.6"]),
+        ((0, 3.6), (0, 3.6), ["0", "1", "2", "3.6"]),  # tick values 0 to 4 widen it by 11 %
+        ((-1.234567, 5.678901), (-1.3, 5.7), [f"{M}1.3", "2", "4", "5.7"]),
+        ((-3.29872, -0.000918805), (-3.3, -0.00091), [f"{M}3.3", f"{M}2", f"{M}1", f"{M}0.00091"]),
+        ((1001.3, 1008.7), (1001, 1009), ["1001", "1004", "1006", "1009"]),  # not 1000 to 1100
+    ],
+)
+def test_colorbar_round_past_a_tenth_rounds_the_ends_to_few_digits(data, clim, labels):
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(*data, 20).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im)
+    assert im.get_clim() == clim  # exact floats: 3.3, not 3.3000000000000003
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in cb.ax.get_yticklabels()] == labels
+    assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
+
+
+@pytest.mark.parametrize(("data", "clim"), [((0, 0.384), (0, 0.4)), ((0, 3.7), (0, 4))])
+def test_colorbar_round_within_a_tenth_keeps_tick_values(data, clim):
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(*data, 20).reshape(4, 5))
+    fwl_mpl.colorbar(im)  # 0 to 3.7 widens to 4 by 8 %
+    assert im.get_clim() == pytest.approx(clim)
+
+
+@pytest.mark.parametrize(
+    ("data", "clim"),
+    [
+        ((1.0, np.nextafter(1.0, 2)), (1.0, 1.00000000000005)),
+        ((1000.0123, 1000.0456), (1000.01, 1000.05)),  # needs 7 digits
+        ((1000001.234, 1000001.9), (1000001.2, 1000002.0)),  # needs 8 digits
+        ((1000.0, 1000.0000036), (1000.0, 1000.000004)),  # both ends round to 1000
+    ],
+)
+def test_colorbar_round_past_6_digits_keeps_tick_values(data, clim):
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(*data, 20).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im)
+    assert im.get_clim() == pytest.approx(clim, rel=1e-15, abs=0)
+    fig.draw_without_rendering()
+    labels = [t.get_text() for t in cb.ax.get_yticklabels()]
+    assert len(set(labels)) == len(labels)
+    assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
+
+
+@pytest.mark.parametrize(("lo", "hi"), [(1e-300, 3.3e-300), (5e-324, 3e-323), (5e-324, 3.3)])
+def test_colorbar_round_of_a_range_near_the_smallest_float(lo, hi):
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(lo, hi, 20).reshape(4, 5))
+    fwl_mpl.colorbar(im)
+    assert im.get_clim()[0] <= lo and im.get_clim()[1] >= hi
+    assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
+
+
+@pytest.mark.parametrize(
+    ("lo", "hi", "ends"),
+    [
+        (0.7, 3.3, ("0.7", "3.3")),
+        (7.7, 7.95, ("7.7", "7.95")),
+        (4.43, 4.47, ("4.43", "4.47")),
+        (12345.6, 12350.1, ("12345.6", "12350.1")),
+    ],
+)
+def test_colorbar_round_of_float32_data_rounds_to_the_decimal_value(lo, hi, ends):
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(lo, hi, 20, dtype=np.float32).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im)  # float32 0.7 is 0.699999988, which would round down to 0.69
+    assert im.get_clim() == (float(np.float32(lo)), hi)  # float32 3.3 is below 3.3
+    fig.draw_without_rendering()
+    labels = [t.get_text() for t in cb.ax.get_yticklabels()]
+    assert (labels[0], labels[-1]) == ends
+    assert len(set(labels)) == len(labels)
+
+
+def test_digit_limits_keep_data_a_rounding_error_past_a_rounded_end():
+    assert layout._digit_limits(3.2999999999995, 7.6000000000004) == (
+        3.2999999999995,
+        7.6000000000004,
+    )
+    assert layout._digit_limits(0, 0.1 * 33) == (0, 0.1 * 33)
+
+
+def test_digit_limits_give_none_when_6_digits_widen_the_range_too_much():
+    assert layout._digit_limits(1000.0123, 1000.0456) is None
+    assert layout._digit_limits(1000.0123, 1000.0956) == (1000.01, 1000.1)
+
+
+def test_colorbar_round_past_a_tenth_keeps_a_format_given():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(0, 3.3, 20).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im, format="%.2f")
+    assert im.get_clim() == (0, 3.3)
+    fig.draw_without_rendering()
+    labels = [t.get_text() for t in cb.ax.get_yticklabels()]
+    assert (labels[0], labels[-1]) == ("0.00", "3.30")
+
+
+@pytest.mark.parametrize(
+    ("value", "up", "expected"),
+    [
+        (3.3, True, 3.3),
+        (3.3, False, 3.3),
+        (3.29872, False, 3.2),
+        (-3.29872, False, -3.3),
+        (-0.000918805, True, -0.00091),
+        (9.96, True, 10.0),
+        (np.float64(0.000918805), False, 0.00091),
+        (0.0, True, 0.0),
+    ],
+)
+def test_round_digits_rounds_outward_to_2_digits(value, up, expected):
+    assert layout._round_digits(value, 2, up=up) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "up", "expected"),
+    [
+        (3.3 * (1 + 5e-8), True, 3.3),
+        (3.3 * (1 + 2e-7), True, 3.4),
+        (3.3 * (1 - 5e-8), False, 3.3),
+        (3.3 * (1 - 2e-7), False, 3.2),
+        (-3.3 * (1 + 5e-8), False, -3.3),
+        (-3.3 * (1 + 2e-7), False, -3.4),
+    ],
+)
+def test_round_digits_takes_a_value_within_1e_7_as_the_rounded_value(value, up, expected):
+    assert layout._round_digits(value, 2, up=up) == expected
+
+
+def test_colorbar_round_of_float32_data_above_its_decimal_value():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(0.12, 0.3, 20, dtype=np.float32).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im)  # float32 0.3 is 0.300000012
+    assert im.get_clim() == (float(np.float32(0.12)), float(np.float32(0.3)))
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in cb.ax.get_yticklabels()] == ["0.12", "0.2", "0.25", "0.3"]
+
+
+@pytest.mark.parametrize(
+    ("data", "labels"),
+    [
+        ((0.1 + 0.2 - 0.3, 0.0361), ["0", "0.01", "0.02", "0.037"]),
+        ((-3.6, 0.1 + 0.2 - 0.3), [f"{M}3.6", f"{M}2", f"{M}1", "0"]),
+    ],
+)
+def test_colorbar_round_labels_an_end_that_is_zero_but_for_rounding_error_0(data, labels):
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.array([data]))
+    cb = fwl_mpl.colorbar(im)
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in cb.ax.get_yticklabels()] == labels
+    assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
+
+
+def test_colorbar_label_drops_inner_ticks_the_label_cannot_show():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(-8647.37, -8647.36, 20, dtype=np.float32).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im, ends="label")
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in cb.ax.get_yticklabels()] == [f"{M}8647.37", f"{M}8647.36"]
+
+
+@pytest.mark.parametrize("how", ["axis", "label"])
+def test_inner_ticks_that_print_like_an_end_are_dropped(how):
+    fig, ax = plt.subplots()
+    if how == "axis":
+        ax.plot([0, 1], [1000.0078, 1000.0178])
+        ax.set_ylim(1000.0078, 1000.0178)
+        fwl_mpl.label_ends(ax, "y")
+        target = ax
+    else:  # the end 1000.0078 and a tick at 1000.01 both print as 1000.01
+        im = ax.imshow(np.array([[1000.0078, 1000.0178]]))
+        target = fwl_mpl.colorbar(im, ends="label").ax
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in target.get_yticklabels()] == ["1000.01", "1000.02"]
+
+
+def test_contour_colorbar_keeps_the_inner_ticks_of_its_offset_labels():
+    x, y = np.meshgrid(np.linspace(0, 1, 20), np.linspace(0, 1, 20))
+    fig, ax = plt.subplots()
+    cb = fwl_mpl.colorbar(ax.contourf(x, y, 123456.7 + 0.2 * x))
+    fig.draw_without_rendering()  # 123456.75 needs 7 digits, but the offset label shows it
+    assert list(cb.get_ticks()) == pytest.approx(
+        [123456.7, 123456.75, 123456.8, 123456.85, 123456.9], rel=1e-12
+    )
+    assert [t.get_text() for t in cb.ax.get_yticklabels()] == [
+        "0.70",
+        "0.75",
+        "0.80",
+        "0.85",
+        "0.90",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("lo", "hi", "labels"),
+    [
+        (1000.0078, 1000.0178, ["1000.01", "1000.02"]),
+        (-1000.0178, -1000.0078, [f"{M}1000.02", f"{M}1000.01"]),
+    ],
+)
+def test_finish_drops_inner_ticks_that_print_like_an_end_of_a_plain_colorbar(lo, hi, labels):
+    fig, ax = plt.subplots()
+    fig.colorbar(ax.imshow(np.array([[lo, hi]])))
+    assert fwl_mpl.finish(fig) == []
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in fig.axes[1].get_yticklabels()] == labels
+
+
+def test_colorbar_with_a_format_keeps_the_ticks_its_labels_show():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.array([[100000.0, 100000.3]]))
+    cb = fwl_mpl.colorbar(im, ends="label", format="%.1f")
+    assert list(cb.get_ticks()) == pytest.approx(
+        [100000.0, 100000.1, 100000.2, 100000.3], rel=1e-12
+    )
+    im = ax.imshow(np.array([[61357.42, 61358.48]]))
+    cb = fwl_mpl.colorbar(im, format="%.2f")  # digit ends 61357.4 and 61358.5
+    expected = [61357.4, 61357.75, 61358.0, 61358.25, 61358.5]
+    assert list(cb.get_ticks()) == pytest.approx(expected, rel=1e-12)
+
+
+def test_end_ticks_keep_only_inner_ticks_the_label_shows_apart():
+    ticks = layout._end_ticks(99999.5, 100000.5)  # 100000.2 needs 7 digits; 100000.5 prints 100000
+    assert list(ticks) == pytest.approx([99999.5, 99999.8, 100000.5], rel=1e-12)
+    assert len(layout._end_ticks(99999.5, 100000.5, labelled=False)) == 5
+    ticks = layout._end_ticks(1000.0, 1000.021)  # 1000.015 would print like the tick 1000.01
+    assert list(ticks) == pytest.approx([1000.0, 1000.01, 1000.021], rel=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("value", "exact"),
+    [
+        (0.0, True),
+        (-0.0, True),
+        (0.1 + 0.2, True),
+        (-2.5, True),
+        (5e-5, True),
+        (1.3e6, True),
+        (1234567.0, False),
+        (1000.005, False),
+        (-8647.365, False),
+    ],
+)
+def test_label_is_exact(value, exact):
+    assert layout._label_is_exact(value) == exact
+
+
+def test_colorbar_round_drops_inner_ticks_the_label_cannot_show():
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.linspace(-8647.37, -8647.36, 20, dtype=np.float32).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im)  # a tick at -8647.365 would print as -8647.37
+    fig.draw_without_rendering()
+    assert [t.get_text() for t in cb.ax.get_yticklabels()] == [f"{M}8647.37", f"{M}8647.36"]
+    assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
+
+
+@pytest.mark.parametrize(
+    ("value", "up", "expected"),
+    [
+        (123456 * (1 + 5e-8), True, 123456),
+        (123456 * (1 + 2e-7), True, 123457),
+        (123456 * (1 - 5e-8), False, 123456),
+        (123456 * (1 - 2e-7), False, 123455),
+    ],
+)
+def test_round_digits_tolerance_is_relative_at_6_digits(value, up, expected):
+    assert layout._round_digits(value, 6, up=up) == expected
+
+
+@pytest.mark.parametrize("value", [0.0, -0.0])
+@pytest.mark.parametrize("up", [True, False])
+def test_round_digits_keeps_zero_positive(value, up):
+    assert math.copysign(1, layout._round_digits(value, 2, up=up)) == 1
+
+
+def test_round_digits_passes_non_finite_values_through():
+    assert layout._round_digits(np.inf, 2, up=True) == np.inf
+    assert np.isnan(layout._round_digits(np.nan, 2, up=False))
+
+
+def test_digit_limits_ignore_the_decimal_context_of_the_caller():
+    import decimal
+
+    with decimal.localcontext() as context:
+        context.prec = 2
+        context.Emax = 3
+        context.traps[decimal.Inexact] = True
+        assert layout._digit_limits(1001.3, 1008.7) == (1001, 1009)
+        assert layout._digit_limits(1.2e22, 3.3e22) == (1.2e22, 3.3e22)
+
+
+@pytest.mark.parametrize(
+    ("lo", "hi"),
+    [
+        (1.0, np.nextafter(1.0, 2)),
+        (1.0, 1.0 + 1e-14),
+        (5.0, 5.0),
+        (1e-300, 3.3e-300),
+        (1e-286, 3.3e-286),
+        (0.0, 1.0),
+        (-2.0, -1.0),
+    ],
+)
+def test_singular_matches_the_range_matplotlib_widens(lo, hi):
+    fig, ax = plt.subplots()
+    free = matplotlib.cm.ScalarMappable(norm=matplotlib.colors.Normalize(lo, hi))
+    fig.colorbar(free, ax=ax)
+    widened = (free.norm.vmin, free.norm.vmax) != (lo, hi)
+    assert layout._singular(lo, hi) == widened
+
+
+@pytest.mark.parametrize(
+    ("lo", "hi"), [(0.0, np.inf), (-np.inf, np.inf), (np.nan, 1.0), (1.0, np.nan)]
+)
+def test_singular_holds_a_range_with_a_non_finite_end(lo, hi):
+    assert layout._singular(lo, hi)
 
 
 def test_colorbar_round_handles_a_log_norm():
@@ -765,7 +1091,7 @@ def test_colorbar_with_cax_and_a_log_norm_without_limits():
     cax = fig.add_axes([0.9, 0.1, 0.03, 0.8])
     free = matplotlib.cm.ScalarMappable(norm=matplotlib.colors.Normalize(0, 3.3))
     cb = fwl_mpl.colorbar(free, cax=cax)
-    assert cb.ax is cax and cb.get_ticks()[[0, -1]] == pytest.approx([0, 4])
+    assert cb.ax is cax and cb.get_ticks()[[0, -1]] == pytest.approx([0, 3.3])
     unset = matplotlib.cm.ScalarMappable(norm=matplotlib.colors.LogNorm())
     with pytest.raises(ValueError, match="log norm"):
         fwl_mpl.colorbar(unset, ax=ax)
