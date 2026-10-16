@@ -152,7 +152,7 @@ if __name__ == "__main__":
     out.mkdir(parents=True, exist_ok=True)
     for mode in fwl_mpl.MODES:
         fig = specimen(mode)
-        problems = fwl_mpl.finish(fig)
+        problems = fwl_mpl.finish(fig, dpi=200)
         if problems:
             raise SystemExit("layout problems:\n" + "\n".join(problems))
         for ext in ("png", "pdf"):

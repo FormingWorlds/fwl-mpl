@@ -1,5 +1,6 @@
 """Layout rules: the collision checker, labelled axis ends and colour bars."""
 
+import io
 import math
 import runpy
 from pathlib import Path
@@ -649,6 +650,103 @@ def test_plain_colorbar_is_reported_and_finish_labels_it():
     fig.colorbar(im)
     assert any("axes 1" in p for p in fwl_mpl.check_figure(fig))
     assert not [p for p in fwl_mpl.finish(fig) if "axes 1" in p]
+
+
+def _bar(make="fwl", **kwargs):
+    fig, ax = plt.subplots(figsize=(3, 2), layout="constrained")
+    im = ax.imshow(np.linspace(0, 1, 20).reshape(4, 5))
+    cb = fwl_mpl.colorbar(im, **kwargs) if make == "fwl" else fig.colorbar(im, **kwargs)
+    return fig, ax, cb
+
+
+@pytest.mark.parametrize("make", ["fwl", "plain"])
+def test_text_inside_a_colour_bar_is_reported(make):
+    fig, _, cb = _bar(make)
+    cb.ax.text(0.5, 0.5, "x", transform=cb.ax.transAxes, ha="center", va="center", fontsize=4)
+    assert _collisions(fig) == ["text 'x' overlaps colour bar"]
+
+
+@pytest.mark.parametrize("make", ["fwl", "plain"])
+def test_title_across_a_colour_bar_is_reported_once(make):
+    fig, ax = plt.subplots(figsize=(2, 2), layout="constrained")
+    im = ax.imshow(np.linspace(0, 1, 36).reshape(6, 6))  # the bar is taller than the image
+    fwl_mpl.colorbar(im) if make == "fwl" else fig.colorbar(im)  # the plain bar shows its outline
+    ax.set_title("a title that runs across the bar")
+    found = [p for p in _collisions(fig) if "text '1.0'" not in p]  # it also crosses the top label
+    assert found == ["text 'a title that runs across the bar' overlaps colour bar"]
+
+
+def test_text_on_the_extend_triangle_of_a_colour_bar_is_reported():
+    fig, _, cb = _bar(extend="min")
+    text = cb.ax.text(0.5, -0.04, "x", transform=cb.ax.transAxes, ha="center", fontsize=4)
+    fig.draw_without_rendering()
+    box = text.get_window_extent()
+    assert box.y1 < cb.ax.bbox.y0  # below the axes, on the triangle
+    assert _collisions(fig) == ["text 'x' overlaps colour bar"]
+
+
+@pytest.mark.parametrize("orientation", ["vertical", "horizontal"])
+def test_colour_bar_labels_beside_the_bar_are_not_reported(orientation):
+    fig, _, _ = _bar(label="Temperature, $T$ (K)", orientation=orientation)
+    assert fwl_mpl.finish(fig) == []
+
+
+def _laid_out(fig):
+    return np.array([a.get_position().extents for a in fig.axes])
+
+
+VECTOR_AT_SAVE_DPI = pytest.mark.skipif(
+    tuple(map(int, matplotlib.__version__.split(".")[:2])) < (3, 11),
+    reason="before 3.11, vector files are laid out with their own text sizes",
+)
+
+
+@pytest.mark.parametrize(
+    "fmt, dpi",
+    [
+        ("png", None),
+        ("png", 200),
+        ("png", "figure"),
+        pytest.param("pdf", None, marks=VECTOR_AT_SAVE_DPI),
+        pytest.param("svg", None, marks=VECTOR_AT_SAVE_DPI),
+    ],
+)
+def test_finish_lays_the_figure_out_as_savefig_does(fmt, dpi):
+    fig, axs = plt.subplots(1, 3, figsize=(6, 2), layout="constrained")
+    for ax in axs:
+        fwl_mpl.colorbar(ax.imshow(np.linspace(0, 3.3, 30).reshape(5, 6)), ax=ax, label="T (K)")
+        ax.set(title="a title", xlabel="x label")
+    dpi_before = fig.dpi
+    fwl_mpl.finish(fig, dpi=dpi)
+    checked = _laid_out(fig)
+    assert fig.dpi == dpi_before
+    fig.savefig(io.BytesIO(), format=fmt, dpi=dpi)
+    assert np.abs(_laid_out(fig) - checked).max() * 6 * 72 < 0.05  # points
+
+
+def test_check_at_the_figure_resolution_ignores_screen_scaling():
+    matplotlib.rcParams["savefig.dpi"] = "figure"
+    fig, axs = plt.subplots(1, 3, figsize=(6, 2), layout="constrained")
+    for ax in axs:
+        fwl_mpl.colorbar(ax.imshow(np.linspace(0, 3.3, 30).reshape(5, 6)), ax=ax, label="T (K)")
+        ax.set(title="a title", xlabel="x label")
+    fig.canvas._set_device_pixel_ratio(2)  # a high-resolution screen doubles fig.dpi
+    screen = fig.dpi
+    assert fwl_mpl.finish(fig) == []
+    checked = _laid_out(fig)
+    assert fig.dpi == screen
+    fig.savefig(io.BytesIO(), format="png")
+    assert np.abs(_laid_out(fig) - checked).max() * 6 * 72 < 0.05
+
+
+def test_check_restores_the_resolution_when_drawing_fails():
+    fig, ax = _clean_axes()
+    ax.text(1, 1, r"$\frac$")
+    dpi = fig.dpi
+    assert dpi != 300
+    with pytest.raises(ValueError):
+        fwl_mpl.check_figure(fig, dpi=300)
+    assert fig.dpi == dpi
 
 
 # finish
