@@ -541,11 +541,6 @@ def finish(fig, dpi=None):
         The problems :func:`check_figure` finds afterwards; empty when the
         figure follows the rules.
     """
-    with _at_dpi(fig, dpi):
-        return _finish(fig, dpi)
-
-
-def _finish(fig, dpi):
     plain, bars, kept = [], [], []
     for ax in _all_axes(fig):
         cb = getattr(ax, "_colorbar", None)

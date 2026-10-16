@@ -724,6 +724,18 @@ def test_finish_lays_the_figure_out_as_savefig_does(fmt, dpi):
     assert np.abs(_laid_out(fig) - checked).max() * 6 * 72 < 0.05  # points
 
 
+def test_check_figure_lays_the_figure_out_as_savefig_does():
+    fig, axs = plt.subplots(1, 3, figsize=(6, 2), layout="constrained")
+    for ax in axs:
+        fwl_mpl.colorbar(ax.imshow(np.linspace(0, 3.3, 30).reshape(5, 6)), ax=ax, label="T (K)")
+        ax.set(title="a title", xlabel="x label")
+    fwl_mpl.check_figure(fig)
+    checked = _laid_out(fig)
+    fig.savefig(io.BytesIO(), format="png")
+    # One more layout pass moves text by hundredths of a point; 150 dpi moves it by 0.5 pt.
+    assert np.abs(_laid_out(fig) - checked).max() * 6 * 72 < 0.1
+
+
 def test_check_at_the_figure_resolution_ignores_screen_scaling():
     matplotlib.rcParams["savefig.dpi"] = "figure"
     fig, axs = plt.subplots(1, 3, figsize=(6, 2), layout="constrained")
