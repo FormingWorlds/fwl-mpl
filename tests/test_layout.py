@@ -670,10 +670,13 @@ def test_text_inside_a_colour_bar_is_reported(make):
 def test_title_across_a_colour_bar_is_reported_once(make):
     fig, ax = plt.subplots(figsize=(2, 2), layout="constrained")
     im = ax.imshow(np.linspace(0, 1, 36).reshape(6, 6))  # the bar is taller than the image
-    fwl_mpl.colorbar(im) if make == "fwl" else fig.colorbar(im)  # the plain bar shows its outline
+    if make == "fwl":
+        fwl_mpl.colorbar(im)
+    else:
+        fig.colorbar(im)  # its outline is visible
     ax.set_title("a title that runs across the bar")
-    found = [p for p in _collisions(fig) if "text '1.0'" not in p]  # it also crosses the top label
-    assert found == ["text 'a title that runs across the bar' overlaps colour bar"]
+    title = "text 'a title that runs across the bar'"
+    assert _collisions(fig) == [f"{title} overlaps text '1.0'", f"{title} overlaps colour bar"]
 
 
 def test_text_on_the_extend_triangle_of_a_colour_bar_is_reported():
@@ -689,6 +692,58 @@ def test_text_on_the_extend_triangle_of_a_colour_bar_is_reported():
 def test_colour_bar_labels_beside_the_bar_are_not_reported(orientation):
     fig, _, _ = _bar(label="Temperature, $T$ (K)", orientation=orientation)
     assert fwl_mpl.finish(fig) == []
+
+
+def _bar_variant(fig, variant):
+    ax = fig.add_subplot()
+    im = ax.imshow(np.linspace(1e-3, 3.3e-3, 30).reshape(5, 6))
+    if variant == "plain, extend both":
+        fig.colorbar(im, extend="both", label="Flux (W)")
+    elif variant == "plain, horizontal, extend both":
+        fig.colorbar(im, extend="both", orientation="horizontal", label="Flux (W)")
+    elif variant in ("left", "top"):
+        fwl_mpl.colorbar(im, location=variant, label="Flux (W)")
+    elif variant == "log":
+        im.set_norm(matplotlib.colors.LogNorm())
+        fwl_mpl.colorbar(im, label="Flux (W)")
+    elif variant == "cax beside":
+        fwl_mpl.colorbar(im, cax=ax.inset_axes([1.05, 0, 0.05, 1]), label="Flux (W)")
+    else:  # a bar on the image itself
+        fwl_mpl.colorbar(im, cax=ax.inset_axes([0.7, 0.1, 0.05, 0.5]))
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "plain, extend both",
+        "plain, horizontal, extend both",
+        "left",
+        "top",
+        "log",
+        "cax beside",
+        "cax on the image",
+    ],
+)
+def test_colour_bars_of_every_kind_pass_with_their_own_labels(variant):
+    fig = plt.figure(figsize=(3.5, 2.6), layout="constrained")
+    _bar_variant(fig, variant)
+    assert fwl_mpl.finish(fig) == []
+
+
+def test_a_legend_on_a_colour_bar_is_reported():
+    fig, ax, cb = _bar()
+    ax.plot([0, 4], [0, 3], label="a line")
+    fig.draw_without_rendering()
+    box = cb.ax.get_position()
+    fig.legend(loc="center", bbox_to_anchor=((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2))
+    assert _collisions(fig) == ["legend overlaps colour bar"]
+
+
+def _shift_pt(fig, before):
+    """Largest move of an axes edge since ``before``, in points."""
+    width, height = fig.get_size_inches()
+    now = np.array([a.get_position().extents for a in fig.axes])
+    return (np.abs(now - before) * 72 * [width, height, width, height]).max()
 
 
 def _laid_out(fig):
@@ -709,6 +764,7 @@ VECTOR_AT_SAVE_DPI = pytest.mark.skipif(
         ("png", "figure"),
         pytest.param("pdf", None, marks=VECTOR_AT_SAVE_DPI),
         pytest.param("svg", None, marks=VECTOR_AT_SAVE_DPI),
+        pytest.param("ps", None, marks=VECTOR_AT_SAVE_DPI),
     ],
 )
 def test_finish_lays_the_figure_out_as_savefig_does(fmt, dpi):
@@ -721,7 +777,7 @@ def test_finish_lays_the_figure_out_as_savefig_does(fmt, dpi):
     checked = _laid_out(fig)
     assert fig.dpi == dpi_before
     fig.savefig(io.BytesIO(), format=fmt, dpi=dpi)
-    assert np.abs(_laid_out(fig) - checked).max() * 6 * 72 < 0.05  # points
+    assert _shift_pt(fig, checked) < 0.05
 
 
 def test_check_figure_lays_the_figure_out_as_savefig_does():
@@ -733,11 +789,11 @@ def test_check_figure_lays_the_figure_out_as_savefig_does():
     checked = _laid_out(fig)
     fig.savefig(io.BytesIO(), format="png")
     # One more layout pass moves text by hundredths of a point; 150 dpi moves it by 0.5 pt.
-    assert np.abs(_laid_out(fig) - checked).max() * 6 * 72 < 0.1
+    assert _shift_pt(fig, checked) < 0.1
 
 
+@matplotlib.rc_context({"savefig.dpi": "figure"})
 def test_check_at_the_figure_resolution_ignores_screen_scaling():
-    matplotlib.rcParams["savefig.dpi"] = "figure"
     fig, axs = plt.subplots(1, 3, figsize=(6, 2), layout="constrained")
     for ax in axs:
         fwl_mpl.colorbar(ax.imshow(np.linspace(0, 3.3, 30).reshape(5, 6)), ax=ax, label="T (K)")
@@ -748,7 +804,15 @@ def test_check_at_the_figure_resolution_ignores_screen_scaling():
     checked = _laid_out(fig)
     assert fig.dpi == screen
     fig.savefig(io.BytesIO(), format="png")
-    assert np.abs(_laid_out(fig) - checked).max() * 6 * 72 < 0.05
+    assert _shift_pt(fig, checked) < 0.05
+
+
+def test_check_leaves_the_window_size_alone():
+    fig, _ = _clean_axes()
+    resized = []
+    fig.canvas.manager.resize = lambda width, height: resized.append((width, height))
+    fwl_mpl.check_figure(fig, dpi=300)
+    assert resized == [] and fig.canvas.manager is not None
 
 
 def test_check_restores_the_resolution_when_drawing_fails():
@@ -798,9 +862,9 @@ def test_finish_leaves_polar_and_hidden_axes_alone():
 
 @pytest.mark.parametrize("mode", fwl_mpl.MODES)
 def test_specimen_follows_the_layout_rules(mode):
-    specimen = runpy.run_path(str(SPECIMEN), run_name="specimen")["specimen"]
-    fig = specimen(mode)
-    assert fwl_mpl.finish(fig) == []
+    script = runpy.run_path(str(SPECIMEN), run_name="specimen")
+    fig = script["specimen"](mode)
+    assert fwl_mpl.finish(fig, dpi=script["DPI"]) == []
 
 
 def test_titles_hidden_artists_and_hidden_axes_are_not_reported():

@@ -503,15 +503,17 @@ def _save_dpi(fig, dpi):
 @contextmanager
 def _at_dpi(fig, dpi):
     """Lay the figure out at the save resolution; text does not scale exactly with it."""
-    old = fig.dpi
-    fig.dpi = _save_dpi(fig, dpi)
+    old, manager = fig.dpi, fig.canvas.manager
+    fig.canvas.manager = None  # as savefig does, so a window is not resized
     try:
+        fig.dpi = _save_dpi(fig, dpi)
         yield
     finally:
         fig.dpi = old
+        fig.canvas.manager = manager
 
 
-def finish(fig, dpi=None):
+def finish(fig, *, dpi=None):
     """Apply the layout rules to a figure and report what is still wrong.
 
     Axes with automatic limits get an even tick grid just outside their data
@@ -577,7 +579,7 @@ def finish(fig, dpi=None):
             cb.set_ticks(_end_ticks(lo, hi, log=axis.get_scale() == "log"))
             cb.formatter = FuncFormatter(_end_label)
         cb._fwl_ends = True
-    return check_figure(fig, dpi)
+    return check_figure(fig, dpi=dpi)
 
 
 # Checks
@@ -802,7 +804,7 @@ def _unlabelled_ends(fig):
     return problems
 
 
-def check_figure(fig, dpi=None):
+def check_figure(fig, *, dpi=None):
     """List the layout problems of a figure.
 
     The figure is laid out at the resolution it is saved at, as ``savefig``
@@ -816,21 +818,22 @@ def check_figure(fig, dpi=None):
         The resolution the figure is saved at, as passed to ``savefig``;
         defaults to ``rcParams["savefig.dpi"]``. From matplotlib 3.11, PDF, SVG
         and PostScript files are laid out at it too; before, with their own
-        text sizes, so text in them can sit more than 1 pt away.
+        text sizes, so text in them can sit a few tenths of a point away.
 
     Returns
     -------
     list of str
         One line per problem: text, tick labels or a legend that overlap a data
-        line, a marker, an error bar, an axis line, a colour bar or other text, and axis or
-        colour-bar ends without a tick label. Empty when the figure follows the
-        rules. Rotated text is tested by its axis-aligned bounding box, which is larger
-        than the glyphs, so rotated labels need clear space around them. Filled
-        areas and images are not obstacles, an annotation is tested by its text,
-        not its arrow, and text on an opaque inset is not tested against the data
-        the inset covers. Axes are numbered in the order of ``fig.axes``, each
-        followed by its inset and secondary axes. Polar, 3D and secondary axes, and axes with dates,
-        categories or other units, are not tested for labelled ends.
+        line, a marker, an error bar, an axis line, a colour bar or other text,
+        and axis or colour-bar ends without a tick label. Empty when the figure
+        follows the rules. Rotated text is tested by its axis-aligned bounding
+        box, which is larger than the glyphs, so rotated labels need clear space
+        around them. Filled areas and images other than colour bars are not
+        obstacles, an annotation is tested by its text, not its arrow, and text
+        on an opaque inset is not tested against the data the inset covers.
+        Axes are numbered in the order of ``fig.axes``, each followed by its
+        inset and secondary axes. Polar, 3D and secondary axes, and axes with
+        dates, categories or other units, are not tested for labelled ends.
     """
     with _at_dpi(fig, dpi):
         fig.draw_without_rendering()
