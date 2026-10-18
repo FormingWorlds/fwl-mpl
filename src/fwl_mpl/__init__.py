@@ -24,11 +24,13 @@ and for full-severity deuteranomaly, protanomaly and tritanomaly, with at least
 
 import logging
 import operator
+import warnings
 from pathlib import Path
 
 import cmcrameri.cm  # noqa: F401  (registers the cmc.* colour maps)
 import fwl_visual_language as fvl
 import matplotlib as mpl
+from fwl_visual_language import mpl as _fvl_mpl
 from matplotlib import cbook, font_manager
 from matplotlib.text import Text
 from matplotlib.transforms import ScaledTranslation
@@ -158,14 +160,38 @@ def register_fonts():
     return added
 
 
+def _check_sheets():
+    """Warn when a bundled style sheet differs from the one the installed tokens build.
+
+    Returns
+    -------
+    list of str
+        The modes whose sheet differs; empty when fwl-visual-language is the
+        commit that this package was built against.
+    """
+    stale = [
+        mode
+        for mode, theme in _THEME.items()
+        if (_HERE / f"{mode}.mplstyle").read_text(encoding="utf-8") != _fvl_mpl.mplstyle(theme)
+    ]
+    if stale:
+        warnings.warn(
+            f"the fwl_mpl {', '.join(stale)} style sheets differ from the installed "
+            f"fwl-visual-language {fvl.__version__}; install the commit that fwl-mpl names",
+            stacklevel=2,
+        )
+    return stale
+
+
 def use(mode="light"):
     """Apply the Forming Worlds Lab style to all following figures.
 
     Parameters
     ----------
     mode : {"light", "dark"}, default "light"
-        "light" draws on white for papers and light docs pages. "dark" draws
-        on the dark background for dark docs pages and slides.
+        "light" draws on white for papers. "dark" draws on the dark
+        background for dark docs pages and slides. Light docs pages have a
+        tinted ground, so save figures for them with ``transparent=True``.
 
     Raises
     ------
@@ -245,8 +271,8 @@ def cmap(role="sequential", mode="light"):
 def panel_label(ax, label, **kwargs):
     """Write a panel label ("a", "b", ...) above the top-left corner of an axes.
 
-    The label sits half a y tick label plus 2 pt above the axes, so it clears a
-    labelled upper end of the y axis at any axes height.
+    The label sits half a y tick label of the axes plus 2 pt above them, so it
+    clears a labelled upper end of the y axis at any axes height.
 
     Parameters
     ----------
@@ -262,7 +288,7 @@ def panel_label(ax, label, **kwargs):
     -------
     matplotlib.text.Text
     """
-    tick_pt = font_manager.FontProperties(size=mpl.rcParams["ytick.labelsize"]).get_size_in_points()
+    tick_pt = ax.yaxis.get_major_ticks(1)[0].label1.get_fontsize()
     lift = ScaledTranslation(0, (tick_pt / 2 + 2) / 72, ax.figure.dpi_scale_trans)
     opts = {
         "transform": ax.transAxes + lift,
@@ -284,6 +310,7 @@ def panel_label(ax, label, **kwargs):
 from .layout import check_figure, colorbar, finish, label_ends, round_limits  # noqa: E402
 
 register_fonts()
+_check_sheets()
 _logger = logging.getLogger("matplotlib.font_manager")
 for _old in [f for f in _logger.filters if type(f).__name__ == "_QuietFallbackWeight"]:
     _logger.removeFilter(_old)

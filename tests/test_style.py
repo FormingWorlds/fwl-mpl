@@ -159,6 +159,28 @@ def test_style_sheet_works_without_use():
     assert Path(path).resolve() == (FONTS / "Geist-Regular.ttf").resolve()
 
 
+def test_style_sheets_match_the_installed_tokens_at_import(recwarn):
+    assert fwl_mpl._check_sheets() == []
+    assert not [w for w in recwarn if "style sheets differ" in str(w.message)]
+
+
+def test_a_sheet_that_differs_from_the_tokens_warns(monkeypatch):
+    monkeypatch.setattr(fwl_mpl._fvl_mpl, "mplstyle", lambda theme: "")
+    with pytest.warns(UserWarning, match="light, dark style sheets differ"):
+        assert fwl_mpl._check_sheets() == ["light", "dark"]
+
+
+def test_readme_colour_table_is_the_palette():
+    path = Path(__file__).resolve().parents[1] / "README.md"
+    if not path.is_file():
+        pytest.skip("no README next to the tests (tests copied out of the repository)")
+    readme = path.read_text(encoding="utf-8")
+    rows = re.findall(r"^\| (\w+) \| `(#[0-9A-F]{6})` \| `(#[0-9A-F]{6})` \|$", readme, re.M)
+    assert rows == [
+        (n, fwl_mpl.PALETTE["light"][n], fwl_mpl.PALETTE["dark"][n]) for n in fwl_mpl.NAMES
+    ]
+
+
 # Fonts
 
 
@@ -179,7 +201,6 @@ def test_register_fonts_adds_missing_files_and_puts_them_first():
         fm.ttflist.insert(0, fake)
         added = fwl_mpl.register_fonts()
         assert sorted(p.name for p in added) == sorted(p.name for p in FONTS.glob("*.ttf"))
-        assert len(added) == 12
         first = fm.ttflist[: len(added)]
         assert all(Path(f.fname).resolve().parent == FONTS.resolve() for f in first)
         assert fake in fm.ttflist
@@ -279,6 +300,13 @@ def test_plain_greek_in_a_math_label_is_a_dummy_glyph(caplog):
     with caplog.at_level(logging.WARNING, logger="matplotlib.mathtext"):
         pdf_fonts(fig)
     assert not any("does not have a glyph" in r.getMessage() for r in caplog.records)
+
+
+def test_calligraphic_math_draws_the_inter_italic():
+    fwl_mpl.use()
+    fig = plt.figure()
+    fig.text(0.1, 0.5, r"$\mathcal{L}$")
+    assert pdf_fonts(fig) == {b"Inter-Italic"}
 
 
 def test_math_fallback_is_sans():
@@ -447,6 +475,18 @@ def test_panel_label_follows_the_tick_label_size():
         fig, ax = plt.subplots()
         t = fwl_mpl.panel_label(ax, "a")
     assert _lift_pt(ax, t) == pytest.approx((0.0, 8.0))
+    fig, ax = plt.subplots()
+    ax.tick_params(axis="y", labelsize=10)
+    t = fwl_mpl.panel_label(ax, "a")
+    assert _lift_pt(ax, t) == pytest.approx((0.0, 7.0))
+
+
+def test_panel_label_lift_is_in_points_at_any_resolution():
+    fwl_mpl.use()
+    fig, ax = plt.subplots()
+    t = fwl_mpl.panel_label(ax, "a")
+    fig.set_dpi(300)
+    assert _lift_pt(ax, t) == pytest.approx((0.0, 6.0))
 
 
 def test_panel_label_on_3d_axes():

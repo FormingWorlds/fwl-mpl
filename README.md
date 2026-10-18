@@ -80,7 +80,7 @@ Constrained layout places text a little differently at another resolution, and `
 
 Signal is the blue of the lab logo and magma the warm colour of the lab website. The light mode is the `paper` theme of `fwl-visual-language` and the dark mode its `dark` theme.
 
-`fwl_mpl.colors(n, mode)` gives the first `n` colours of a cycle, `fwl_mpl.PALETTE[mode][name]` a single colour by name, and `fwl_mpl.SURFACES[mode]` the neutral colours: `background`, `ink` (text and boxplots), `muted` (secondary text), `axis` (axes and ticks), `line` (grid) and `observed` (measured data points: the ink colour in light mode, a lighter ink in dark mode).
+`fwl_mpl.colors(n, mode)` gives the first `n` colours of a cycle, `fwl_mpl.PALETTE[mode][name]` a single colour by name, and `fwl_mpl.SURFACES[mode]` the neutral colours: `background`, `ink` (text and boxplots), `muted` (secondary text), `axis` (axes and ticks), `line` (grid) and `observed` (measured data points: the ink colour in light mode, a lighter ink in dark mode). The palette colour `ink` is the grey series colour, close to the `axis` grey; `SURFACES[mode]["ink"]` is the text colour.
 
 Each mode has its own palette. In each one, the closest pair of colours is CAM02-UCS ΔE 15.0 apart in light mode and 11.0 in dark mode, the lowest value over normal vision and full-severity deuteranomaly, protanomaly and tritanomaly (simulated with `colorspacious`). At partial severities, sampled in steps of 1 %, no pair comes closer. With the same measure, the 7-colour Okabe-Ito palette (without black) scores 11.0. The `observed` colour is at least ΔE 12 from every palette colour. Every colour has at least 3:1 contrast against the light background and 4.5:1 against the dark one. The tests check these limits.
 
@@ -98,7 +98,7 @@ For more than 8 series, vary the line style or use a sequential colour map.
 
 ## Documenter.jl pages
 
-`fwl_mpl.docs_theme` installs the Documenter.jl theme of `fwl-visual-language`, which restyles the stock Documenter.jl light and dark themes with the lab colours and fonts, so a Julia docs site matches the figures. Run, from the repository that holds the docs:
+`fwl_mpl.docs_theme` installs the Documenter.jl theme of `fwl-visual-language`, which restyles the stock Documenter.jl light and dark themes with the lab colours and fonts, so a Julia docs site uses the colours and fonts of the figures. Light pages have a tinted ground (ink-50), so save figures for them with `savefig(..., transparent=True)`. Run, from the repository that holds the docs:
 
 ```bash
 python -m fwl_mpl.docs_theme docs/src/assets
@@ -110,7 +110,7 @@ then list the stylesheet in `docs/make.jl`:
 format = Documenter.HTML(; assets = ["assets/fwl.css"])
 ```
 
-The command writes `fwl.css` and the web fonts (`fwl-fonts/`, with their OFL licences) into the folder and replaces earlier copies; run it again after updating `fwl-mpl` so the pages follow token changes. `python -m fwl_visual_language.documenter` does the same.
+The command writes `fwl.css` and the web fonts (`fwl-fonts/`, with their OFL licences) into the folder and replaces earlier copies of these files; it leaves other files there, so delete the IBM Plex files of `fwl-mpl` 0.1 from `fwl-fonts/` by hand. Run it again after updating `fwl-mpl` so the pages follow token changes. `python -m fwl_visual_language.documenter` does the same.
 
 The stylesheet applies to the Documenter light and dark themes, whether the reader's system setting picks them or the reader chooses one in the settings dialog. The catppuccin themes in that dialog keep their own colours. The selectors follow the class names of Documenter.jl 1.19. A later Documenter release can rename classes and leave single elements in the stock colours.
 

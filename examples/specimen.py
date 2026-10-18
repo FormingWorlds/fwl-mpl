@@ -81,7 +81,7 @@ def specimen(mode):
         ylabel=r"Radius, $R_\mathrm{p}$ ($R_\mathrm{Earth}$)",
     )
     ax.set_ylim(0, 2.5)  # room below the curves for the legend
-    ax.legend(loc="lower right", labelspacing=0.25, fontsize=7)
+    ax.legend(loc="lower right", labelspacing=0.25, fontsize=7)  # 7 pt as in a: clears the curves
 
     # c: sequential field
     ax = axs[2]

@@ -679,6 +679,7 @@ def test_title_across_a_colour_bar_is_reported_once(make):
     found = _collisions(fig)
     # whether the title also reaches the '1.0' label depends on the matplotlib version
     assert found.count(f"{title} overlaps colour bar") == 1
+    assert len(found) == len(set(found)), found
     assert set(found) <= {f"{title} overlaps text '1.0'", f"{title} overlaps colour bar"}
 
 
@@ -741,8 +742,9 @@ def test_a_legend_on_a_colour_bar_is_reported():
     fig.legend(loc="center", bbox_to_anchor=((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2))
     found = _collisions(fig)
     # the legend is wide enough to reach the tick labels next to the bar too
-    assert "legend overlaps colour bar" in found
-    assert all(p.startswith("legend overlaps text '0.") for p in found[:-1]), found
+    assert found.count("legend overlaps colour bar") == 1
+    assert len(found) == len(set(found)), found
+    assert all(p.startswith("legend overlaps text '0.") for p in found if "bar" not in p), found
 
 
 def _shift_pt(fig, before):
@@ -785,6 +787,30 @@ def test_finish_lays_the_figure_out_as_savefig_does(fmt, dpi):
     fig.savefig(io.BytesIO(), format=fmt, dpi=dpi)
     # vector files keep unhinted text widths; Geist moves 0.14 pt here, see the README
     assert _shift_pt(fig, checked) < (0.05 if fmt == "png" else 0.2)
+
+
+@VECTOR_AT_SAVE_DPI
+def test_vector_tolerance_tells_the_save_resolution_from_the_figure_one():
+    fig, axs = plt.subplots(1, 3, figsize=(6, 2), layout="constrained")
+    for ax in axs:
+        fwl_mpl.colorbar(ax.imshow(np.linspace(0, 3.3, 30).reshape(5, 6)), ax=ax, label="T (K)")
+        ax.set(title="a title", xlabel="x label")
+    fwl_mpl.finish(fig, dpi=fig.dpi)  # laid out at 150 dpi, saved at 300
+    checked = _laid_out(fig)
+    fig.savefig(io.BytesIO(), format="pdf")
+    assert _shift_pt(fig, checked) > 0.2
+
+
+def test_finish_decides_labelled_ends_at_the_save_resolution(monkeypatch):
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1])
+    fig.colorbar(ax.scatter([0, 1], [0, 1], c=[0.3, 0.7]))
+    seen, real = [], layout._ends_on_ticks
+    monkeypatch.setattr(layout, "_ends_on_ticks", lambda a, n: seen.append(fig.dpi) or real(a, n))
+    fwl_mpl.finish(fig, dpi=250)
+    assert len(seen) == 3  # x, y and the colour bar
+    assert set(seen) == {250}
+    assert fig.dpi == 150
 
 
 def test_check_figure_lays_the_figure_out_as_savefig_does():

@@ -1,5 +1,6 @@
 """Documenter.jl theme: the wrapper of fwl_visual_language.documenter and its command line."""
 
+import re
 import runpy
 import sys
 
@@ -22,6 +23,19 @@ def test_install_writes_stylesheet_fonts_and_licences(tmp_path):
     assert sorted(p.name for p in fonts.glob("*.woff2"))
     assert (fonts / "OFL-Geist.txt").is_file()
     assert (fonts / "OFL-Inter.txt").is_file()
+
+
+def test_every_font_the_stylesheet_names_is_installed_next_to_it(tmp_path):
+    out = docs_theme.install_documenter_theme(tmp_path)
+    files = re.findall(r'url\("?(fwl-fonts/[^")]+)"?\)', out.read_text(encoding="utf-8"))
+    assert len(files) >= 4
+    assert [f for f in files if not (tmp_path / f).is_file()] == []
+
+
+def test_install_is_idempotent(tmp_path):
+    first = docs_theme.install_documenter_theme(tmp_path).read_bytes()
+    second = docs_theme.install_documenter_theme(tmp_path).read_bytes()
+    assert first == second
 
 
 def test_command_line_installs_and_prints_the_path(tmp_path, capsys):

@@ -117,17 +117,18 @@ def test_palette_separation_under_cvd(mode):
 
 
 @pytest.mark.parametrize("mode", fwl_mpl.MODES)
-def test_palette_separation_stays_above_the_documented_floor_at_partial_severity(mode):
+def test_no_pair_comes_closer_at_partial_severity_than_at_full_severity(mode):
+    full = min_delta_e(fwl_mpl.colors(mode=mode))
     cols = np.array([rgb(h) for h in fwl_mpl.colors(mode=mode)])
     for kind in ("deuteranomaly", "protanomaly", "tritanomaly"):
-        for severity in range(2, 101, 2):
+        for severity in range(1, 101):
             cvd = {"name": "sRGB1+CVD", "cvd_type": kind, "severity": severity}
             sim = np.clip(cspace_convert(cols, cvd, "sRGB1"), 0, 1)
             ucs = cspace_convert(sim, "sRGB1", "CAM02-UCS")
             worst = min(
                 float(np.linalg.norm(ucs[i] - ucs[j])) for i, j in combinations(range(8), 2)
             )
-            assert worst >= MIN_DELTA_E[mode], (kind, severity, worst)
+            assert worst >= full - 1e-9, (kind, severity, worst)
 
 
 # Okabe-Ito, 7 colours without black.
