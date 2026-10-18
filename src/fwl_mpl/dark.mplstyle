@@ -1,48 +1,49 @@
-## Forming Worlds Lab style, dark mode.
-## Colours must match PALETTE["dark"] and SURFACES["dark"] in __init__.py.
+## Forming Worlds Lab figure style, dark mode (fwl-visual-language 0.1.0).
+## Generated from the lab tokens; edit tokens/fwl.json, not this file.
+## image.cmap names a Crameri map: import cmcrameri before plotting images.
 
 ## Figure: one column of a two-column page; PDF and PS embed TrueType fonts,
 ## SVG draws text as paths so it renders without the fonts installed
 figure.figsize: 3.5, 2.6
 figure.dpi: 150
 figure.constrained_layout.use: True
-figure.facecolor: 0D0C17
-savefig.facecolor: 0D0C17
+figure.facecolor: 010305
+savefig.facecolor: 010305
 savefig.dpi: 300
 pdf.fonttype: 42
 ps.fonttype: 42
 svg.fonttype: path
 
-## Type: IBM Plex Sans with true italic for math variables
-font.family: IBM Plex Sans, DejaVu Sans
-font.monospace: IBM Plex Mono, DejaVu Sans Mono
+## Type: Geist for words, Inter for math and Greek
+font.family: Geist, Inter, DejaVu Sans
+font.monospace: Geist Mono, DejaVu Sans Mono
 font.size: 8.5
 mathtext.fontset: custom
-mathtext.rm: IBM Plex Sans
-mathtext.sf: IBM Plex Sans
-mathtext.it: IBM Plex Sans:italic
-mathtext.bf: IBM Plex Sans:medium
-mathtext.cal: IBM Plex Sans:italic
+mathtext.rm: Inter
+mathtext.sf: Inter
+mathtext.it: Inter:italic
+mathtext.bf: Inter:medium
+mathtext.cal: Inter:italic
 mathtext.fallback: stixsans
 axes.unicode_minus: True
 
 ## Colours
-axes.prop_cycle: cycler('color', ['59B1EE', 'DC4C00', 'B7E2B2', 'FCB71E', '8A67F2', '46999E', 'BA6384', '98AB71'])
+axes.prop_cycle: cycler('color', ['4DAAD8', 'F1935B', '6AE7AD', '7E66C3', 'F3C451', '4A8289', 'C25656', 'BACAD7'])
 image.cmap: cmc.batlow
-axes.facecolor: 0D0C17
-axes.edgecolor: 9C98AE
-axes.labelcolor: ECEAF4
-text.color: ECEAF4
-xtick.color: 9C98AE
-ytick.color: 9C98AE
-xtick.labelcolor: ECEAF4
-ytick.labelcolor: ECEAF4
-grid.color: 2A2838
-legend.labelcolor: ECEAF4
-boxplot.boxprops.color: ECEAF4
-boxplot.whiskerprops.color: ECEAF4
-boxplot.capprops.color: ECEAF4
-boxplot.flierprops.markeredgecolor: ECEAF4
+axes.facecolor: 010305
+axes.edgecolor: 8B949A
+axes.labelcolor: E3E8EC
+text.color: E3E8EC
+xtick.color: 8B949A
+ytick.color: 8B949A
+xtick.labelcolor: E3E8EC
+ytick.labelcolor: E3E8EC
+grid.color: 2A343C
+legend.labelcolor: E3E8EC
+boxplot.boxprops.color: E3E8EC
+boxplot.whiskerprops.color: E3E8EC
+boxplot.capprops.color: E3E8EC
+boxplot.flierprops.markeredgecolor: E3E8EC
 errorbar.capsize: 0
 
 ## Axes: open frame, outward ticks, no grid

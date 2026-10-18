@@ -565,11 +565,13 @@ def finish(fig, *, dpi=None):
                 _snap_to_ticks(ax, name)
             else:
                 round_limits(ax, name)
-    # Tick locators settle only once the figure is laid out.
-    fig.draw_without_rendering()
-    for ax, name in plain:
-        if not _ends_on_ticks(ax, name):
-            label_ends(ax, name)
+    # Tick locators settle only once the figure is laid out, and the axis length
+    # they use changes a little with the resolution: decide at the save one.
+    with _at_dpi(fig, dpi):
+        fig.draw_without_rendering()
+        for ax, name in plain:
+            if not _ends_on_ticks(ax, name):
+                label_ends(ax, name)
     for ax in kept:
         _unclip_markers(ax)
     for cb in bars:

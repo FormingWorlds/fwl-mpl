@@ -5,13 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fwl-mpl"
 dynamic = ["version"]
-description = "Matplotlib style for Forming Worlds Lab figures: colour-vision-safe palette, IBM Plex type, light and dark modes."
+description = "Matplotlib style for Forming Worlds Lab figures: colour-vision-safe palette, Geist and Inter type, light and dark modes."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "Apache-2.0 AND OFL-1.1"
-license-files = ["LICENSE", "src/fwl_mpl/fonts/OFL.txt"]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Forming Worlds Lab" }]
-dependencies = ["matplotlib>=3.7", "cmcrameri>=1.7"]
+dependencies = [
+    "matplotlib>=3.7",
+    "cmcrameri>=1.7",
+    "fwl-visual-language @ git+https://github.com/FormingWorlds/fwl-visual-language@f915e3cbf069a7ffe720a1e44f687b56f3a3eec1",
+]
 keywords = ["matplotlib", "style", "colour-blind", "planetary-science"]
 classifiers = [
     "Framework :: Matplotlib",
@@ -34,7 +38,7 @@ version = { attr = "fwl_mpl.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-fwl_mpl = ["*.mplstyle", "fonts/*"]
+fwl_mpl = ["*.mplstyle"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
