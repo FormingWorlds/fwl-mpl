@@ -565,20 +565,22 @@ def finish(fig, *, dpi=None):
                 _snap_to_ticks(ax, name)
             else:
                 round_limits(ax, name)
-    # Tick locators settle only once the figure is laid out.
-    fig.draw_without_rendering()
-    for ax, name in plain:
-        if not _ends_on_ticks(ax, name):
-            label_ends(ax, name)
+    # Tick locators settle only once the figure is laid out, and the axis length
+    # they use changes a little with the resolution: decide at the save one.
+    with _at_dpi(fig, dpi):
+        fig.draw_without_rendering()
+        for ax, name in plain:
+            if not _ends_on_ticks(ax, name):
+                label_ends(ax, name)
+        for cb in bars:
+            axis = cb.ax.yaxis if cb.orientation == "vertical" else cb.ax.xaxis
+            if not _ends_on_ticks(cb.ax, axis.axis_name):
+                lo, hi = sorted(axis.get_view_interval())
+                cb.set_ticks(_end_ticks(lo, hi, log=axis.get_scale() == "log"))
+                cb.formatter = FuncFormatter(_end_label)
+            cb._fwl_ends = True
     for ax in kept:
         _unclip_markers(ax)
-    for cb in bars:
-        axis = cb.ax.yaxis if cb.orientation == "vertical" else cb.ax.xaxis
-        if not _ends_on_ticks(cb.ax, axis.axis_name):
-            lo, hi = sorted(axis.get_view_interval())
-            cb.set_ticks(_end_ticks(lo, hi, log=axis.get_scale() == "log"))
-            cb.formatter = FuncFormatter(_end_label)
-        cb._fwl_ends = True
     return check_figure(fig, dpi=dpi)
 
 

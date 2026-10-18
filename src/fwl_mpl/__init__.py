@@ -10,23 +10,30 @@ or, without calling a function::
 
     plt.style.use("fwl_mpl.light")
 
-Importing the package registers the bundled IBM Plex fonts and the Crameri
-scientific colour maps (``cmc.*``), so the style sheets work on their own.
+Importing the package registers the Geist and Inter fonts of
+``fwl-visual-language`` and the Crameri scientific colour maps (``cmc.*``), so
+the style sheets work on their own.
 
-The categorical palette has 8 hues. Each mode has its own set, fitted so that
-the closest pair stays at CAM02-UCS Delta E >= 12 for normal vision and for
-full-severity deuteranomaly, protanomaly and tritanomaly, with at least 3:1
-contrast against the light background and 4.5:1 against the dark one.
+Colours, fonts and the style sheets come from the lab tokens in
+``fwl-visual-language``: the light mode is its ``paper`` theme, the dark mode its
+``dark`` theme. The categorical palette has 8 hues per mode; the closest pair
+stays at CAM02-UCS Delta E >= 14.9 (light) and >= 10.9 (dark) for normal vision
+and for full-severity deuteranomaly, protanomaly and tritanomaly, with at least
+3:1 contrast against the light background and 4.5:1 against the dark one.
 """
 
 import logging
 import operator
+import warnings
 from pathlib import Path
 
 import cmcrameri.cm  # noqa: F401  (registers the cmc.* colour maps)
+import fwl_visual_language as fvl
 import matplotlib as mpl
+from fwl_visual_language import mpl as _fvl_mpl
 from matplotlib import cbook, font_manager
 from matplotlib.text import Text
+from matplotlib.transforms import ScaledTranslation
 
 __all__ = [
     "COLORMAPS",
@@ -48,66 +55,54 @@ __all__ = [
     "use",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 _HERE = Path(__file__).parent
-_FONTS = _HERE / "fonts"
+_FONTS = fvl.fonts_dir() / "ttf"
 
 MODES = ("light", "dark")
 
-# Fixed cycle order: series k always gets the k-th colour.
-NAMES = ("azure", "vermilion", "emerald", "amber", "violet", "teal", "rose", "olive")
+# Token theme per mode of this package.
+_THEME = {"light": "paper", "dark": "dark"}
 
-PALETTE = {
-    "light": {
-        "azure": "#008FF3",
-        "vermilion": "#C94D45",
-        "emerald": "#388E6A",
-        "amber": "#C98702",
-        "violet": "#6C3FB4",
-        "teal": "#275F60",
-        "rose": "#90003E",
-        "olive": "#556C00",
-    },
-    "dark": {
-        "azure": "#59B1EE",
-        "vermilion": "#DC4C00",
-        "emerald": "#B7E2B2",
-        "amber": "#FCB71E",
-        "violet": "#8A67F2",
-        "teal": "#46999E",
-        "rose": "#BA6384",
-        "olive": "#98AB71",
-    },
-}
+# Fixed cycle order: series k always gets the k-th colour.
+NAMES = tuple(fvl.tokens()["palette"]["names"])
+
+PALETTE = {mode: dict(fvl.palette(theme)) for mode, theme in _THEME.items()}
 
 CYCLE = [PALETTE["light"][n] for n in NAMES]
 CYCLE_DARK = [PALETTE["dark"][n] for n in NAMES]
 
-# Neutrals per mode. "observed" is the colour for measured data points; it stays
-# at Delta E >= 12 from every palette colour under the same vision conditions.
-SURFACES = {
-    "light": {
-        "background": "#FFFFFF",
-        "ink": "#17151F",
-        "muted": "#615D70",
-        "line": "#E1DFEA",
-        "observed": "#17151F",
-    },
-    "dark": {
-        "background": "#0D0C17",
-        "ink": "#ECEAF4",
-        "muted": "#9C98AE",
-        "line": "#2A2838",
-        "observed": "#ECEAF4",
-    },
-}
+# Ink step for measured data points; it stays at Delta E >= 12 from every
+# palette colour under the same vision conditions (heading is too close to
+# the dark "ink" hue).
+_OBSERVED = {"light": "ink-950", "dark": "ink-50"}
+
+
+def _surfaces(mode):
+    r = fvl.roles(_THEME[mode])
+    return {
+        "background": r["background"],
+        "ink": r["heading"],
+        "muted": r["muted"],
+        "axis": r["axis"],
+        "line": r["line"],
+        "observed": fvl.color(_OBSERVED[mode]),
+    }
+
+
+SURFACES = {mode: _surfaces(mode) for mode in _THEME}
 
 # Crameri scientific colour maps by role. berlin has a dark midpoint, which
 # reads as "zero" on a dark background; vik has a light one.
+_MAPS = fvl.tokens()["colormaps"]["default"]
 COLORMAPS = {
-    "light": {"sequential": "cmc.batlow", "diverging": "cmc.vik", "cyclic": "cmc.romaO"},
-    "dark": {"sequential": "cmc.batlow", "diverging": "cmc.berlin", "cyclic": "cmc.romaO"},
+    mode: {
+        "sequential": f"cmc.{_MAPS['sequential']}",
+        "diverging": f"cmc.{_MAPS['diverging_' + mode]}",
+        "cyclic": "cmc.romaO",
+    }
+    for mode in _THEME
 }
 
 
@@ -115,7 +110,7 @@ class _QuietFallbackWeight(logging.Filter):
     """Drop the notice that DejaVu Sans, the fallback for missing glyphs, has no Medium.
 
     matplotlib passes (weight, family, fallback weight), or (weight, fallback weight)
-    before 3.11.2. The bundled Plex has a Medium, so in the 2-argument form a medium
+    before 3.11.2. Geist and Inter have a Medium, so in the 2-argument form a medium
     request that falls back to 400 comes from DejaVu Sans.
     """
 
@@ -139,7 +134,7 @@ def _check_mode(mode):
 
 
 def register_fonts():
-    """Register the bundled IBM Plex fonts with matplotlib for this session.
+    """Register the Geist, Geist Mono and Inter fonts with matplotlib for this session.
 
     Repeated calls are cheap: a font file that is already registered is skipped.
 
@@ -156,13 +151,36 @@ def register_fonts():
             continue
         font_manager.fontManager.addfont(str(path))
         added.append(path)
-    # findfont takes the first exact match, so the bundled files go before any
-    # system copy of IBM Plex.
+    # findfont takes the first exact match, so these files go before any system
+    # copy of the same fonts.
     fonts_dir = _FONTS.resolve()
     ours = [f for f in ttflist if Path(f.fname).resolve().parent == fonts_dir]
     ids = {id(f) for f in ours}
     ttflist[:] = ours + [f for f in ttflist if id(f) not in ids]
     return added
+
+
+def _check_sheets():
+    """Warn when a bundled style sheet differs from the one the installed tokens build.
+
+    Returns
+    -------
+    list of str
+        The modes whose sheet differs; empty when fwl-visual-language is the
+        commit that this package was built against.
+    """
+    stale = [
+        mode
+        for mode, theme in _THEME.items()
+        if (_HERE / f"{mode}.mplstyle").read_text(encoding="utf-8") != _fvl_mpl.mplstyle(theme)
+    ]
+    if stale:
+        warnings.warn(
+            f"the fwl_mpl {', '.join(stale)} style sheets differ from the installed "
+            f"fwl-visual-language {fvl.__version__}; install the commit that fwl-mpl names",
+            stacklevel=2,
+        )
+    return stale
 
 
 def use(mode="light"):
@@ -171,8 +189,9 @@ def use(mode="light"):
     Parameters
     ----------
     mode : {"light", "dark"}, default "light"
-        "light" draws on white for papers and light docs pages. "dark" draws
-        on the dark background for dark docs pages and slides.
+        "light" draws on white for papers. "dark" draws on the dark
+        background for dark docs pages and slides. Light docs pages have a
+        tinted ground, so save figures for them with ``transparent=True``.
 
     Raises
     ------
@@ -186,7 +205,7 @@ def use(mode="light"):
     plt.style.use(str(_HERE / f"{mode}.mplstyle"))
     # matplotlib 3.8 added this key, so it cannot go in the style sheets.
     if "mathtext.bfit" in mpl.rcParams:
-        mpl.rcParams["mathtext.bfit"] = "IBM Plex Sans:italic:medium"
+        mpl.rcParams["mathtext.bfit"] = f"{fvl.tokens()['fonts']['math']}:italic:medium"
 
 
 def colors(n=None, mode="light"):
@@ -252,6 +271,9 @@ def cmap(role="sequential", mode="light"):
 def panel_label(ax, label, **kwargs):
     """Write a panel label ("a", "b", ...) above the top-left corner of an axes.
 
+    The label sits half a y tick label of the axes plus 2 pt above them, so it
+    clears a labelled upper end of the y axis at any axes height.
+
     Parameters
     ----------
     ax : matplotlib.axes.Axes
@@ -266,8 +288,10 @@ def panel_label(ax, label, **kwargs):
     -------
     matplotlib.text.Text
     """
+    tick_pt = ax.yaxis.get_major_ticks(1)[0].label1.get_fontsize()
+    lift = ScaledTranslation(0, (tick_pt / 2 + 2) / 72, ax.figure.dpi_scale_trans)
     opts = {
-        "transform": ax.transAxes,
+        "transform": ax.transAxes + lift,
         "horizontalalignment": "right",
         "verticalalignment": "bottom",
         "fontweight": "medium",
@@ -280,12 +304,13 @@ def panel_label(ax, label, **kwargs):
         del opts["fontsize"], opts["fontweight"]
     opts.update(user)
     text = getattr(ax, "text2D", ax.text)
-    return text(-0.02, 1.03, label, **opts)
+    return text(-0.02, 1.0, label, **opts)
 
 
 from .layout import check_figure, colorbar, finish, label_ends, round_limits  # noqa: E402
 
 register_fonts()
+_check_sheets()
 _logger = logging.getLogger("matplotlib.font_manager")
 for _old in [f for f in _logger.filters if type(f).__name__ == "_QuietFallbackWeight"]:
     _logger.removeFilter(_old)

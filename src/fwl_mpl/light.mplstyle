@@ -1,5 +1,6 @@
-## Forming Worlds Lab style, light mode.
-## Colours must match PALETTE["light"] and SURFACES["light"] in __init__.py.
+## Forming Worlds Lab figure style, paper mode (fwl-visual-language 0.1.0).
+## Generated from the lab tokens; edit tokens/fwl.json, not this file.
+## image.cmap names a Crameri map: import cmcrameri before plotting images.
 
 ## Figure: one column of a two-column page; PDF and PS embed TrueType fonts,
 ## SVG draws text as paths so it renders without the fonts installed
@@ -13,36 +14,36 @@ pdf.fonttype: 42
 ps.fonttype: 42
 svg.fonttype: path
 
-## Type: IBM Plex Sans with true italic for math variables
-font.family: IBM Plex Sans, DejaVu Sans
-font.monospace: IBM Plex Mono, DejaVu Sans Mono
+## Type: Geist for words, Inter for math and Greek
+font.family: Geist, Inter, DejaVu Sans
+font.monospace: Geist Mono, DejaVu Sans Mono
 font.size: 8.5
 mathtext.fontset: custom
-mathtext.rm: IBM Plex Sans
-mathtext.sf: IBM Plex Sans
-mathtext.it: IBM Plex Sans:italic
-mathtext.bf: IBM Plex Sans:medium
-mathtext.cal: IBM Plex Sans:italic
+mathtext.rm: Inter
+mathtext.sf: Inter
+mathtext.it: Inter:italic
+mathtext.bf: Inter:medium
+mathtext.cal: Inter:italic
 mathtext.fallback: stixsans
 axes.unicode_minus: True
 
 ## Colours
-axes.prop_cycle: cycler('color', ['008FF3', 'C94D45', '388E6A', 'C98702', '6C3FB4', '275F60', '90003E', '556C00'])
+axes.prop_cycle: cycler('color', ['0072A1', 'B74B21', '20A976', '4E2585', 'BC8D03', '124F54', '741721', '6E747A'])
 image.cmap: cmc.batlow
 axes.facecolor: FFFFFF
-axes.edgecolor: 615D70
-axes.labelcolor: 17151F
-text.color: 17151F
-xtick.color: 615D70
-ytick.color: 615D70
-xtick.labelcolor: 17151F
-ytick.labelcolor: 17151F
-grid.color: E1DFEA
-legend.labelcolor: 17151F
-boxplot.boxprops.color: 17151F
-boxplot.whiskerprops.color: 17151F
-boxplot.capprops.color: 17151F
-boxplot.flierprops.markeredgecolor: 17151F
+axes.edgecolor: 6B747C
+axes.labelcolor: 010305
+text.color: 010305
+xtick.color: 6B747C
+ytick.color: 6B747C
+xtick.labelcolor: 010305
+ytick.labelcolor: 010305
+grid.color: CBD2D7
+legend.labelcolor: 010305
+boxplot.boxprops.color: 010305
+boxplot.whiskerprops.color: 010305
+boxplot.capprops.color: 010305
+boxplot.flierprops.markeredgecolor: 010305
 errorbar.capsize: 0
 
 ## Axes: open frame, outward ticks, no grid

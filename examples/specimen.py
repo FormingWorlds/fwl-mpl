@@ -45,7 +45,7 @@ def specimen(mode):
         peak = (1500 - 8 * (80 - r)) * (1 - np.exp(-r / 25))
         ax.plot(t, 300 + peak * (t / tau) * np.exp(1 - t / tau), label=f"{r} km")
     ax.set(xlabel=r"Time after CAI, $t$ (Myr)", ylabel=r"Peak temperature, $T_\mathrm{max}$ (K)")
-    ax.set_ylim(0, 3000)  # headroom above the curves for the legend
+    ax.set_ylim(0, 4000)  # headroom above the curves for the legend
     ax.legend(
         ncol=2,
         loc="upper right",
@@ -81,7 +81,7 @@ def specimen(mode):
         ylabel=r"Radius, $R_\mathrm{p}$ ($R_\mathrm{Earth}$)",
     )
     ax.set_ylim(0, 2.5)  # room below the curves for the legend
-    ax.legend(loc="lower right", labelspacing=0.25)
+    ax.legend(loc="lower right", labelspacing=0.25, fontsize=7)  # 7 pt as in a: clears the curves
 
     # c: sequential field
     ax = axs[2]

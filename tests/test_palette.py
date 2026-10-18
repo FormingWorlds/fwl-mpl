@@ -3,6 +3,7 @@
 import re
 from itertools import combinations
 
+import fwl_visual_language as fvl
 import numpy as np
 import pytest
 from colorspacious import cspace_convert
@@ -14,9 +15,9 @@ CVD = [None] + [
     {"name": "sRGB1+CVD", "cvd_type": t, "severity": 100}
     for t in ("deuteranomaly", "protanomaly", "tritanomaly")
 ]
-MIN_DELTA_E = 12.0
-# Lowest value over partial severities (dark mode, protanomaly, 92 %); see the README.
-PARTIAL_SEVERITY_FLOOR = 11.8
+# Floors just under the measured minima (14.97 light, 11.00 dark); see the README.
+MIN_DELTA_E = {"light": 14.9, "dark": 10.9}
+MIN_OBSERVED_DELTA_E = 12.0
 MIN_CONTRAST = {"light": 3.0, "dark": 4.5}
 
 
@@ -67,6 +68,21 @@ def test_palette_names_and_format(mode):
     assert len(set(pal.values())) == 8
 
 
+@pytest.mark.parametrize(("mode", "theme"), [("light", "paper"), ("dark", "dark")])
+def test_colours_are_the_token_values(mode, theme):
+    assert list(fwl_mpl.PALETTE[mode].items()) == fvl.palette(theme)
+    r = fvl.roles(theme)
+    s = fwl_mpl.SURFACES[mode]
+    assert (s["background"], s["ink"], s["muted"], s["axis"], s["line"]) == (
+        r["background"],
+        r["heading"],
+        r["muted"],
+        r["axis"],
+        r["line"],
+    )
+    assert fwl_mpl.COLORMAPS[mode]["sequential"] == "cmc.batlow"
+
+
 def test_cycles_follow_names():
     assert fwl_mpl.CYCLE == [fwl_mpl.PALETTE["light"][n] for n in fwl_mpl.NAMES]
     assert fwl_mpl.CYCLE_DARK == [fwl_mpl.PALETTE["dark"][n] for n in fwl_mpl.NAMES]
@@ -84,6 +100,7 @@ def test_text_neutrals_are_readable(mode):
     s = fwl_mpl.SURFACES[mode]
     assert contrast(s["ink"], s["background"]) >= 7.0
     assert contrast(s["muted"], s["background"]) >= 4.5
+    assert contrast(s["axis"], s["background"]) >= 4.5
     assert contrast(s["observed"], s["background"]) >= 4.5
 
 
@@ -91,26 +108,27 @@ def test_text_neutrals_are_readable(mode):
 def test_observed_colour_separates_from_palette(mode):
     observed = fwl_mpl.SURFACES[mode]["observed"]
     for name, h in fwl_mpl.PALETTE[mode].items():
-        assert min_delta_e([observed, h]) >= MIN_DELTA_E, name
+        assert min_delta_e([observed, h]) >= MIN_OBSERVED_DELTA_E, name
 
 
 @pytest.mark.parametrize("mode", fwl_mpl.MODES)
 def test_palette_separation_under_cvd(mode):
-    assert min_delta_e(fwl_mpl.colors(mode=mode)) >= MIN_DELTA_E
+    assert min_delta_e(fwl_mpl.colors(mode=mode)) >= MIN_DELTA_E[mode]
 
 
 @pytest.mark.parametrize("mode", fwl_mpl.MODES)
-def test_palette_separation_stays_above_the_documented_floor_at_partial_severity(mode):
+def test_no_pair_comes_closer_at_partial_severity_than_at_full_severity(mode):
+    full = min_delta_e(fwl_mpl.colors(mode=mode))
     cols = np.array([rgb(h) for h in fwl_mpl.colors(mode=mode)])
     for kind in ("deuteranomaly", "protanomaly", "tritanomaly"):
-        for severity in range(2, 101, 2):
+        for severity in range(1, 101):
             cvd = {"name": "sRGB1+CVD", "cvd_type": kind, "severity": severity}
             sim = np.clip(cspace_convert(cols, cvd, "sRGB1"), 0, 1)
             ucs = cspace_convert(sim, "sRGB1", "CAM02-UCS")
             worst = min(
                 float(np.linalg.norm(ucs[i] - ucs[j])) for i, j in combinations(range(8), 2)
             )
-            assert worst >= PARTIAL_SEVERITY_FLOOR, (kind, severity, worst)
+            assert worst >= full - 1e-9, (kind, severity, worst)
 
 
 # Okabe-Ito, 7 colours without black.
@@ -120,8 +138,8 @@ OKABE_ITO = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "
 @pytest.mark.parametrize(
     ("hexes", "expected"),
     [
-        (fwl_mpl.colors(mode="light"), 12.6),
-        (fwl_mpl.colors(mode="dark"), 12.3),
+        (fwl_mpl.colors(mode="light"), 15.0),
+        (fwl_mpl.colors(mode="dark"), 11.0),
         (OKABE_ITO, 11.0),
     ],
     ids=["light", "dark", "okabe-ito"],
